@@ -1,0 +1,208 @@
+@startuml 02_derivacion_trazabilidad
+!include _estilo.iuml
+title Diagrama de clases 2 — Derivación, empaquetado, cadena de envío, recepción y resultados
+
+class Atencion <<ver diagrama 1>>
+class Clinica <<ver diagrama 1>>
+class Veterinario <<ver diagrama 1>>
+abstract class Persona <<ver diagrama 1>>
+
+enum Prioridad {
+  NORMAL
+  URGENTE
+}
+
+enum EstadoOrden {
+  EMITIDA
+  EN_PROCESO
+  COMPLETA
+  CANCELADA
+}
+
+class OrdenDerivacion {
+  - numero: str
+  - fecha_emision: datetime
+  - prioridad: Prioridad
+  - indicaciones_clinicas: str
+  - estado: EstadoOrden
+  + solicitar_analisis(t: TipoAnalisis, m: Muestra): AnalisisSolicitado
+  + registrar_extraccion(tipo: TipoMuestra, volumen: float): Muestra
+  + esta_completa(): bool
+}
+
+class AnalisisSolicitado {
+  - id: int
+  - observaciones: str
+  + tiene_resultado(): bool
+}
+
+class TipoAnalisis {
+  - codigo: str
+  - nombre: str
+  - tipo_muestra_requerida: TipoMuestra
+  - temp_min_c: float
+  - temp_max_c: float
+  - horas_max_viabilidad: int
+  - precio: float
+}
+
+enum TipoMuestra {
+  SANGRE
+  SUERO
+  ORINA
+  MATERIA_FECAL
+  TEJIDO
+  HISOPADO
+}
+
+class Muestra {
+  - codigo: str
+  - tipo: TipoMuestra
+  - fecha_hora_extraccion: datetime
+  - volumen_ml: float
+  - estado: EstadoMuestra
+  + es_viable(ahora: datetime): bool
+}
+note right of Muestra
+  Ciclo de vida con patrón State
+  e historial inmutable (diagrama 3).
+end note
+
+class Conservadora {
+  - codigo: str
+  - capacidad: int
+  - temp_min_c: float
+  - temp_max_c: float
+  - disponible: bool
+  + admite(m: Muestra): bool
+}
+note bottom of Conservadora
+  Contenedor isotérmico.
+  admite() controla capacidad y
+  rango de temperatura del análisis.
+end note
+
+class RemitoBiologico {
+  - numero: str
+  - fecha_hora_emision: datetime
+  - estado: EstadoRemito
+  + agregar_muestra(m: Muestra): void
+  + precintar(nro_precinto: str): PrecintoSanitario
+  + despachar(t: Transportista): TramoEnvio
+  + registrar_tramo(t: TramoEnvio): void
+  + recibir(r: RecepcionLaboratorio): void
+  + tiempo_transito(): timedelta
+}
+
+enum EstadoPrecinto {
+  INTACTO
+  ROTO
+}
+
+class PrecintoSanitario {
+  - numero: str
+  - fecha_hora_colocacion: datetime
+  - estado: EstadoPrecinto
+  + verificar(intacto: bool): bool
+  + esta_intacto(): bool
+}
+
+class TramoEnvio {
+  - nro_orden: int
+  - origen: str
+  - destino: str
+  - fecha_hora_salida: datetime
+  - fecha_hora_llegada: datetime
+  - temperatura_salida_c: float
+  - temperatura_llegada_c: float
+  - entregado_por: str
+  - recibido_por: str
+  - observaciones: str
+  + duracion(): timedelta
+}
+note bottom of TramoEnvio
+  Cada tramo es un eslabón de
+  la cadena de custodia
+  (clínica → ... → laboratorio).
+end note
+
+class Transportista {
+  - id: int
+  - razon_social: str
+  - cuit: str
+  - telefono: str
+  - patente_vehiculo: str
+}
+
+class LaboratorioCentral {
+  - id: int
+  - nombre: str
+  - direccion: str
+  - telefono: str
+}
+
+class Bioquimico {
+  - matricula: str
+}
+Persona <|-- Bioquimico
+
+class RecepcionLaboratorio {
+  - fecha_hora: datetime
+  - estado_precinto_verificado: EstadoPrecinto
+  - temperatura_arribo_c: float
+  - aceptada: bool
+  - motivo_rechazo: str
+  + evaluar(remito: RemitoBiologico): bool
+}
+note bottom of RecepcionLaboratorio
+  Si el precinto llega ROTO:
+  aceptada = False y todas las
+  muestras pasan a "Rechazada".
+end note
+
+class ResultadoAnalisis {
+  - id: int
+  - fecha_hora: datetime
+  - interpretacion: str
+  - observaciones: str
+  + valores_fuera_de_rango(): list[DetalleResultado]
+}
+
+class DetalleResultado {
+  - parametro: str
+  - valor: float
+  - unidad: str
+  - valor_ref_min: float
+  - valor_ref_max: float
+  + fuera_de_rango(): bool
+}
+
+' --- Relaciones ---
+Atencion "1" -- "0..*" OrdenDerivacion : emite >
+OrdenDerivacion --> Prioridad
+OrdenDerivacion --> EstadoOrden
+OrdenDerivacion "0..*" --> "1" LaboratorioCentral : destino >
+OrdenDerivacion "1" *-- "1..*" AnalisisSolicitado
+OrdenDerivacion "1" *-- "1..*" Muestra
+AnalisisSolicitado "0..*" --> "1" TipoAnalisis
+AnalisisSolicitado "1..*" --> "1" Muestra : se procesa sobre >
+AnalisisSolicitado "1" -- "0..1" ResultadoAnalisis
+TipoAnalisis --> TipoMuestra
+Muestra --> TipoMuestra
+Muestra "0..*" --> "1" Veterinario : extraída por >
+
+RemitoBiologico "0..1" o-- "1..*" Muestra : contiene >
+RemitoBiologico "0..*" --> "1" Conservadora : utiliza >
+RemitoBiologico "1" *-- "1" PrecintoSanitario
+RemitoBiologico "1" *-- "1..*" TramoEnvio : cadena de envío >
+RemitoBiologico "0..*" --> "1" Clinica : origen >
+RemitoBiologico "0..*" --> "1" LaboratorioCentral : destino >
+RemitoBiologico "1" -- "0..1" RecepcionLaboratorio
+PrecintoSanitario --> EstadoPrecinto
+TramoEnvio "0..*" --> "1" Transportista
+
+RecepcionLaboratorio "0..*" --> "1" Bioquimico : recibe >
+Bioquimico "0..*" --> "1" LaboratorioCentral : trabaja en >
+ResultadoAnalisis "0..*" --> "1" Bioquimico : firma >
+ResultadoAnalisis "1" *-- "1..*" DetalleResultado
+@enduml

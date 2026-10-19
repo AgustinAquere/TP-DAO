@@ -1,0 +1,86 @@
+@startuml 05_facturacion_strategy
+!include _estilo.iuml
+skinparam linetype polyline
+title Diagrama de clases 5 — Comprobantes de atención con patrón Strategy (cálculo de tarifa)
+
+class Cliente <<ver diagrama 1>>
+class Clinica <<ver diagrama 1>>
+class Atencion <<ver diagrama 1>>
+class TipoAnalisis <<ver diagrama 2>>
+class Vacuna <<ver diagrama 1>>
+
+class ComprobanteAtencion {
+  - numero: str
+  - fecha_emision: datetime
+  - _estrategia: EstrategiaTarifa
+  + set_estrategia(e: EstrategiaTarifa): void
+  + agregar_item(i: ItemComprobante): void
+  + subtotal(): float
+  + total(): float
+  + subtotal_por_tipo(t: TipoItem): float
+}
+note left of ComprobanteAtencion
+  total():
+  return self._estrategia.calcular_total(self.items)
+end note
+
+enum TipoItem {
+  SERVICIO_CLINICO
+  ANALISIS_LABORATORIO
+  VACUNA
+  INSUMO
+}
+
+class ItemComprobante {
+  - descripcion: str
+  - tipo: TipoItem
+  - cantidad: int
+  - precio_unitario: float
+  + importe(): float
+}
+
+class ServicioClinico {
+  - codigo: str
+  - nombre: str
+  - precio_base: float
+}
+
+interface EstrategiaTarifa <<ABC>> {
+  + {abstract} calcular_total(items: list[ItemComprobante]): float
+}
+
+class TarifaConsulta {
+  + calcular_total(items): float
+}
+class TarifaControl {
+  - descuento_pct: float
+  + calcular_total(items): float
+}
+class TarifaUrgencia {
+  - recargo_pct: float
+  - recargo_nocturno_pct: float
+  - fecha_hora: datetime
+  + calcular_total(items): float
+}
+note bottom of TarifaUrgencia
+  La estrategia se elige según
+  Atencion.tipo (CONSULTA / CONTROL /
+  URGENCIA) sin usar if/elif en el
+  comprobante: diccionario
+  {TipoAtencion: EstrategiaTarifa}.
+end note
+
+ComprobanteAtencion "0..*" --> "1" Cliente : a nombre de >
+ComprobanteAtencion "0..*" --> "1" Clinica : emitido por >
+ComprobanteAtencion "0..1" --> "1" Atencion : factura >
+ComprobanteAtencion "1" *-- "1..*" ItemComprobante
+ComprobanteAtencion o--> "1" EstrategiaTarifa : _estrategia
+ItemComprobante --> TipoItem
+ItemComprobante "0..*" --> "0..1" ServicioClinico
+ItemComprobante "0..*" --> "0..1" TipoAnalisis
+ItemComprobante "0..*" --> "0..1" Vacuna
+
+EstrategiaTarifa <|.. TarifaConsulta
+EstrategiaTarifa <|.. TarifaControl
+EstrategiaTarifa <|.. TarifaUrgencia
+@enduml

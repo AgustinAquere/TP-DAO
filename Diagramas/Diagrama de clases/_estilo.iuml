@@ -1,0 +1,18 @@
+skinparam classAttributeIconSize 0
+skinparam shadowing false
+skinparam linetype polyline
+skinparam nodesep 60
+skinparam ranksep 70
+skinparam defaultFontName Arial
+skinparam classFontStyle bold
+skinparam class {
+  BackgroundColor #FDFDFE
+  BorderColor #3B4A6B
+  ArrowColor #3B4A6B
+  HeaderBackgroundColor #DCE6F5
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #B8A060
+}
+hide empty members

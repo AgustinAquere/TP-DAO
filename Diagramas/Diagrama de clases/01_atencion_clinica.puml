@@ -1,0 +1,168 @@
+@startuml 01_atencion_clinica
+!include _estilo.iuml
+title Diagrama de clases 1 — Atención clínica (clientes, mascotas, historias clínicas, turnos y vacunas)
+
+abstract class Persona {
+  - id: int
+  - dni: str
+  - nombre: str
+  - apellido: str
+  - telefono: str
+  - email: str
+  + nombre_completo(): str
+}
+
+class Cliente {
+  - direccion: str
+  - fecha_alta: date
+  - activo: bool
+  + agregar_mascota(m: Mascota): void
+  + mascotas(): list[Mascota]
+}
+
+class Veterinario {
+  - matricula: str
+  - especialidad: str
+}
+
+Persona <|-- Cliente
+Persona <|-- Veterinario
+
+class Clinica {
+  - id: int
+  - nombre: str
+  - direccion: str
+  - telefono: str
+  - cuit: str
+}
+
+class Especie {
+  - id: int
+  - nombre: str
+}
+
+class Mascota {
+  - id: int
+  - nombre: str
+  - raza: str
+  - sexo: str
+  - fecha_nacimiento: date
+  - peso_kg: float
+  - microchip: str
+  + edad_en_meses(): int
+  + vacunas_pendientes(fecha: date): list[VacunaObligatoria]
+}
+
+class HistoriaClinica <<Iterable>> {
+  - numero: str
+  - fecha_apertura: date
+  - observaciones_generales: str
+  - alergias: str
+  + agregar_atencion(a: Atencion): void
+  + __iter__(): Iterator[Atencion]
+}
+
+enum TipoAtencion {
+  CONSULTA
+  CONTROL
+  URGENCIA
+}
+
+class Atencion {
+  - id: int
+  - fecha_hora: datetime
+  - tipo: TipoAtencion
+  - motivo: str
+  - anamnesis: str
+  - diagnostico: str
+  - peso_registrado_kg: float
+  + agregar_tratamiento(t: Tratamiento): void
+  + aplicar_vacuna(v: Vacuna, lote: str): AplicacionVacuna
+  + emitir_orden_derivacion(lab: LaboratorioCentral, analisis: list[TipoAnalisis]): OrdenDerivacion
+  + validar_esquema_vacunas(): list[VacunaObligatoria]
+}
+
+class Tratamiento {
+  - id: int
+  - descripcion: str
+  - medicamento: str
+  - dosis: str
+  - frecuencia: str
+  - fecha_inicio: date
+  - fecha_fin: date
+}
+
+class Vacuna {
+  - id: int
+  - nombre: str
+  - laboratorio_fabricante: str
+}
+
+class VacunaObligatoria {
+  - edad_minima_semanas: int
+  - frecuencia_refuerzo_dias: int
+  + corresponde_aplicar(m: Mascota, fecha: date): bool
+}
+note bottom of VacunaObligatoria
+  Esquema obligatorio por especie.
+  Se controla al registrar cada atención.
+end note
+
+class AplicacionVacuna {
+  - id: int
+  - fecha: date
+  - lote: str
+  - fecha_proxima_dosis: date
+}
+
+enum EstadoTurno {
+  RESERVADO
+  ATENDIDO
+  CANCELADO
+  AUSENTE
+}
+
+class Turno {
+  - id: int
+  - fecha_hora_inicio: datetime
+  - duracion_min: int
+  - estado: EstadoTurno
+  + fecha_hora_fin(): datetime
+  + se_superpone_con(otro: Turno): bool
+}
+
+class Agenda {
+  - fecha: date
+  + reservar(mascota: Mascota, inicio: datetime, duracion: int): Turno
+  + turnos_disponibles(): list[datetime]
+}
+note right of Agenda
+  Valida que no haya superposición
+  de turnos del mismo veterinario
+  (Turno.se_superpone_con).
+end note
+
+class OrdenDerivacion <<ver diagrama 2>>
+
+' --- Relaciones ---
+Cliente "1" -- "0..*" Mascota : responsable >
+Mascota "0..*" --> "1" Especie
+Mascota "1" *-- "1" HistoriaClinica
+HistoriaClinica "1" o-- "0..*" Atencion
+Atencion --> TipoAtencion
+Atencion "0..*" --> "1" Veterinario : atendida por >
+Atencion "0..*" --> "1" Clinica : realizada en >
+Atencion "0..1" --> "0..1" Turno : origina <
+Atencion "1" *-- "0..*" Tratamiento
+Atencion "1" *-- "0..*" AplicacionVacuna
+Atencion "1" -- "0..*" OrdenDerivacion : emite >
+AplicacionVacuna "0..*" --> "1" Vacuna
+Especie "1" *-- "0..*" VacunaObligatoria : esquema >
+VacunaObligatoria "0..*" --> "1" Vacuna
+Veterinario "0..*" -- "1..*" Clinica : trabaja en >
+Veterinario "1" *-- "0..*" Agenda
+Agenda "1" o-- "0..*" Turno
+Turno "0..*" --> "1" Mascota
+Turno "0..*" --> "1" Clinica
+Turno --> EstadoTurno
+@enduml

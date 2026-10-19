@@ -1,0 +1,129 @@
+@startuml 06_capas_servicios_dao
+!include _estilo.iuml
+skinparam linetype polyline
+skinparam packageStyle rectangle
+left to right direction
+title Diagrama de clases 6 — Capas de servicios (lógica de negocio) y persistencia (DAO + Singleton)
+
+package "Servicios (reglas de negocio)" {
+  class ClienteService {
+    + alta(datos): Cliente
+    + modificar(c: Cliente): void
+    + baja(id: int): void
+    + buscar(texto: str): list[Cliente]
+  }
+  class MascotaService {
+    + alta(datos, responsable: Cliente): Mascota
+    + historia_clinica(id_mascota: int): HistoriaClinica
+  }
+  note bottom of MascotaService
+    Valida: toda mascota debe
+    tener un responsable.
+  end note
+  class TurnoService {
+    + reservar(vet: Veterinario, mascota: Mascota, inicio: datetime, dur: int): Turno
+    + cancelar(id: int): void
+  }
+  note bottom of TurnoService
+    Valida: sin superposición
+    de turnos del profesional.
+  end note
+  class AtencionService {
+    + registrar(atencion: Atencion): void
+    + emitir_orden(atencion: Atencion, lab, analisis): OrdenDerivacion
+  }
+  note bottom of AtencionService
+    Valida esquema de vacunas
+    obligatorias al registrar.
+  end note
+  class DerivacionService {
+    + registrar_extraccion(orden, tipo, volumen): Muestra
+    + armar_remito(muestras, conservadora): RemitoBiologico
+    + precintar(remito, nro): void
+    + despachar(remito, transportista): void
+    + registrar_tramo(remito, tramo): void
+  }
+  class LaboratorioService {
+    + registrar_recepcion(remito, precinto_intacto: bool, temp: float): RecepcionLaboratorio
+    + registrar_resultado(analisis: AnalisisSolicitado, detalles): ResultadoAnalisis
+  }
+  note bottom of LaboratorioService
+    Precinto roto → muestras
+    "Rechazada"; no se procesan.
+  end note
+  class FacturacionService {
+    - estrategias: dict[TipoAtencion, EstrategiaTarifa]
+    + emitir_comprobante(atencion: Atencion): ComprobanteAtencion
+  }
+  class ReporteService {
+    + atenciones_y_derivaciones(desde, hasta): list
+    + muestras_rechazadas(desde, hasta): list
+    + tratamientos_y_vacunas_pendientes(): list
+    + facturacion_por_clinica(desde, hasta): list
+    + tiempos_promedio_transito(desde, hasta): list
+  }
+}
+
+package "Persistencia (DAO)" {
+  class ConexionBD <<Singleton>> {
+    - {static} _instancia: ConexionBD
+    - _conexion: sqlite3.Connection
+    + {static} obtener_instancia(): ConexionBD
+    + cursor(): Cursor
+    + commit(): void
+  }
+
+  abstract class BaseDAO<T> <<ABC>> {
+    # conexion: ConexionBD
+    + {abstract} insertar(obj: T): int
+    + {abstract} actualizar(obj: T): void
+    + {abstract} eliminar(id: int): void
+    + {abstract} obtener_por_id(id: int): T
+    + {abstract} listar(): list[T]
+  }
+
+  class ClienteDAO
+  class MascotaDAO
+  class TurnoDAO {
+    + turnos_de(vet_id: int, fecha: date): list[Turno]
+  }
+  class AtencionDAO
+  class OrdenDerivacionDAO
+  class MuestraDAO {
+    + insertar_cambio_estado(id_muestra: int, c: CambioEstado): void
+  }
+  class RemitoDAO
+  class RecepcionDAO
+  class ResultadoDAO
+  class ComprobanteDAO
+  class ReporteDAO {
+    + consulta(sql: str, params): list[tuple]
+  }
+}
+
+BaseDAO <|-- ClienteDAO
+BaseDAO <|-- MascotaDAO
+BaseDAO <|-- TurnoDAO
+BaseDAO <|-- AtencionDAO
+BaseDAO <|-- OrdenDerivacionDAO
+BaseDAO <|-- MuestraDAO
+BaseDAO <|-- RemitoDAO
+BaseDAO <|-- RecepcionDAO
+BaseDAO <|-- ResultadoDAO
+BaseDAO <|-- ComprobanteDAO
+BaseDAO --> ConexionBD
+ReporteDAO --> ConexionBD
+
+ClienteService --> ClienteDAO
+MascotaService --> MascotaDAO
+TurnoService --> TurnoDAO
+AtencionService --> AtencionDAO
+AtencionService --> OrdenDerivacionDAO
+DerivacionService --> MuestraDAO
+DerivacionService --> RemitoDAO
+LaboratorioService --> RecepcionDAO
+LaboratorioService --> ResultadoDAO
+LaboratorioService --> MuestraDAO
+FacturacionService --> ComprobanteDAO
+ReporteService --> ReporteDAO
+@enduml

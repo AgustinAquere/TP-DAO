@@ -1,0 +1,75 @@
+@startuml 04_patron_state_remito
+!include _estilo.iuml
+skinparam linetype polyline
+title Diagrama de clases 4 — Patrón State: ciclo de vida del Remito biológico
+
+class RemitoBiologico {
+  - numero: str
+  - _estado: EstadoRemito
+  - muestras: list[Muestra]
+  - precinto: PrecintoSanitario
+  - tramos: list[TramoEnvio]
+  + agregar_muestra(m: Muestra): void
+  + precintar(nro_precinto: str): void
+  + despachar(t: Transportista): void
+  + registrar_tramo(t: TramoEnvio): void
+  + recibir(r: RecepcionLaboratorio): void
+  + nombre_estado(): str
+  ~ cambiar_estado(nuevo: EstadoRemito): void
+}
+
+abstract class EstadoRemito <<ABC>> {
+  + {abstract} nombre(): str
+  + agregar_muestra(r: RemitoBiologico, m: Muestra): void
+  + precintar(r: RemitoBiologico, nro: str): void
+  + despachar(r: RemitoBiologico, t: Transportista): void
+  + registrar_tramo(r: RemitoBiologico, t: TramoEnvio): void
+  + recibir(r: RemitoBiologico, rec: RecepcionLaboratorio): void
+}
+
+class EnPreparacion {
+  + agregar_muestra(r, m): void
+  + precintar(r, nro): void
+}
+note bottom of EnPreparacion
+  Solo acepta muestras si la
+  conservadora las admite.
+  precintar(): crea el precinto,
+  cada muestra → empaquetar()
+  y pasa a Precintado.
+end note
+
+class Precintado {
+  + despachar(r, t): void
+}
+note bottom of Precintado
+  despachar(): crea el primer
+  TramoEnvio, cada muestra →
+  despachar(); pasa a EnTransito.
+end note
+
+class EnTransitoRemito as "EnTransito" {
+  + registrar_tramo(r, t): void
+  + recibir(r, rec): void
+}
+note bottom of EnTransitoRemito
+  recibir(): si rec.precinto INTACTO →
+  muestras.recibir(), pasa a Recibido;
+  si ROTO → muestras.rechazar(),
+  pasa a Rechazado.
+end note
+
+class Recibido
+class Rechazado
+
+EstadoRemito <|-- EnPreparacion
+EstadoRemito <|-- Precintado
+EstadoRemito <|-- EnTransitoRemito
+EstadoRemito <|-- Recibido
+EstadoRemito <|-- Rechazado
+
+RemitoBiologico o--> "1" EstadoRemito : _estado
+RemitoBiologico "0..1" o--> "1..*" Muestra : delega transiciones >
+class Muestra <<ver diagrama 3>>
+
+@enduml

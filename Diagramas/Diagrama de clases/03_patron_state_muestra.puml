@@ -1,0 +1,121 @@
+@startuml 03_patron_state_muestra
+!include _estilo.iuml
+skinparam linetype polyline
+title Diagrama de clases 3 — Patrón State: ciclo de vida de la Muestra + historial inmutable (Iterator)
+
+package "Contexto" {
+  class Muestra {
+    - codigo: str
+    - _estado: EstadoMuestra
+    - _historial: HistorialEstados
+    + empaquetar(remito: RemitoBiologico): void
+    + despachar(): void
+    + recibir(): void
+    + analizar(resultado: ResultadoAnalisis): void
+    + rechazar(motivo: str): void
+    + nombre_estado(): str
+    + historial(): HistorialEstados
+    ~ cambiar_estado(nuevo: EstadoMuestra, responsable: str, obs: str): void
+  }
+}
+
+package "Estados (State)" {
+  abstract class EstadoMuestra <<ABC>> {
+    + {abstract} nombre(): str
+    + empaquetar(m: Muestra, remito: RemitoBiologico): void
+    + despachar(m: Muestra): void
+    + recibir(m: Muestra): void
+    + analizar(m: Muestra, r: ResultadoAnalisis): void
+    + rechazar(m: Muestra, motivo: str): void
+    + es_final(): bool
+  }
+  note top of EstadoMuestra
+    Por defecto cada operación lanza
+    TransicionInvalidaError; cada estado
+    concreto redefine solo las transiciones
+    que le son válidas.
+  end note
+
+  class Extraida {
+    + nombre(): str
+    + empaquetar(m, remito): void
+    + rechazar(m, motivo): void
+  }
+  class Empaquetada {
+    + nombre(): str
+    + despachar(m): void
+  }
+  class EnTransito {
+    + nombre(): str
+    + recibir(m): void
+    + rechazar(m, motivo): void
+  }
+  class Recibida {
+    + nombre(): str
+    + analizar(m, r): void
+    + rechazar(m, motivo): void
+  }
+  class Analizada {
+    + nombre(): str
+    + es_final(): bool
+  }
+  class Rechazada {
+    + nombre(): str
+    + es_final(): bool
+  }
+}
+
+class TransicionInvalidaError <<Exception>>
+
+package "Trazabilidad (Iterator)" {
+  class CambioEstado <<dataclass(frozen=True)>> {
+    + fecha_hora: datetime
+    + estado_anterior: str
+    + estado_nuevo: str
+    + responsable: str
+    + observacion: str
+  }
+
+  class HistorialEstados <<Iterable>> {
+    - _cambios: list[CambioEstado]
+    + registrar(c: CambioEstado): void
+    + ultimo(): CambioEstado
+    + __len__(): int
+    + __iter__(): IteradorHistorial
+  }
+  note bottom of HistorialEstados
+    Solo permite agregar (append-only):
+    no expone métodos para modificar
+    ni eliminar cambios → trazabilidad
+    inmutable de estados.
+  end note
+
+  class IteradorHistorial <<Iterator>> {
+    - _cambios: list[CambioEstado]
+    - _indice: int
+    + __iter__(): IteradorHistorial
+    + __next__(): CambioEstado
+  }
+}
+
+Muestra o--> "1" EstadoMuestra : _estado
+Muestra *--> "1" HistorialEstados
+HistorialEstados *--> "0..*" CambioEstado
+HistorialEstados ..> IteradorHistorial : <<crea>>
+IteradorHistorial --> "0..*" CambioEstado : recorre
+
+EstadoMuestra <|-- Extraida
+EstadoMuestra <|-- Empaquetada
+EstadoMuestra <|-- EnTransito
+EstadoMuestra <|-- Recibida
+EstadoMuestra <|-- Analizada
+EstadoMuestra <|-- Rechazada
+EstadoMuestra ..> TransicionInvalidaError : <<lanza>>
+
+note bottom of Rechazada
+  Transiciones válidas:
+  Extraída → Empaquetada → En tránsito → Recibida → Analizada
+  Extraída | En tránsito | Recibida → Rechazada
+  (p. ej. precinto roto en la recepción)
+end note
+@enduml
