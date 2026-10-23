@@ -1,0 +1,449 @@
+@startuml DER
+' Notación: * = NOT NULL | <<PK>> clave primaria | <<FK>> clave foránea | <<UK>> único
+hide circle
+hide empty members
+skinparam linetype ortho
+skinparam shadowing false
+skinparam nodesep 50
+skinparam ranksep 60
+skinparam defaultFontName Arial
+skinparam packageStyle rectangle
+skinparam class {
+  BackgroundColor #FDFDFE
+  BorderColor #3B4A6B
+  ArrowColor #3B4A6B
+  HeaderBackgroundColor #DCE6F5
+  FontStyle bold
+}
+skinparam package {
+  BorderColor #8A97B3
+  FontColor #3B4A6B
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #B8A060
+}
+title DER — Veterinaria: red de clínicas y derivación a laboratorio (TP Integrador 2026, Tema 2)
+
+' =====================================================================
+package "Atención clínica" #F3F7FC {
+
+entity "clinica" as clinica {
+  * id_clinica : INTEGER <<PK>>
+  --
+  * nombre : TEXT
+  * direccion : TEXT
+    telefono : TEXT
+  * cuit : TEXT <<UK>>
+}
+
+entity "cliente" as cliente {
+  * id_cliente : INTEGER <<PK>>
+  --
+  * dni : TEXT <<UK>>
+  * nombre : TEXT
+  * apellido : TEXT
+    telefono : TEXT
+    email : TEXT
+    direccion : TEXT
+  * fecha_alta : DATE
+  * activo : BOOLEAN
+}
+
+entity "veterinario" as veterinario {
+  * id_veterinario : INTEGER <<PK>>
+  --
+  * dni : TEXT <<UK>>
+  * nombre : TEXT
+  * apellido : TEXT
+    telefono : TEXT
+    email : TEXT
+  * matricula : TEXT <<UK>>
+    especialidad : TEXT
+}
+
+entity "veterinario_clinica" as veterinario_clinica {
+  * id_veterinario : INTEGER <<PK, FK>>
+  * id_clinica : INTEGER <<PK, FK>>
+}
+
+entity "especie" as especie {
+  * id_especie : INTEGER <<PK>>
+  --
+  * nombre : TEXT <<UK>>
+}
+
+entity "mascota" as mascota {
+  * id_mascota : INTEGER <<PK>>
+  --
+  * id_cliente : INTEGER <<FK>>
+  * id_especie : INTEGER <<FK>>
+  * nombre : TEXT
+    raza : TEXT
+    sexo : TEXT {M, H}
+    fecha_nacimiento : DATE
+    peso_kg : REAL
+    microchip : TEXT <<UK>>
+}
+
+entity "historia_clinica" as historia_clinica {
+  * id_historia : INTEGER <<PK>>
+  --
+  * id_mascota : INTEGER <<FK, UK>>
+  * numero : TEXT <<UK>>
+  * fecha_apertura : DATE
+    observaciones_generales : TEXT
+    alergias : TEXT
+}
+
+entity "turno" as turno {
+  * id_turno : INTEGER <<PK>>
+  --
+  * id_veterinario : INTEGER <<FK>>
+  * id_mascota : INTEGER <<FK>>
+  * id_clinica : INTEGER <<FK>>
+  * fecha_hora_inicio : DATETIME
+  * duracion_min : INTEGER
+  * estado : TEXT {RESERVADO, ATENDIDO,\n  CANCELADO, AUSENTE}
+}
+
+entity "atencion" as atencion {
+  * id_atencion : INTEGER <<PK>>
+  --
+  * id_historia : INTEGER <<FK>>
+  * id_veterinario : INTEGER <<FK>>
+  * id_clinica : INTEGER <<FK>>
+    id_turno : INTEGER <<FK, UK>>
+  * fecha_hora : DATETIME
+  * tipo : TEXT {CONSULTA, CONTROL, URGENCIA}
+  * motivo : TEXT
+    anamnesis : TEXT
+    diagnostico : TEXT
+    peso_registrado_kg : REAL
+}
+
+entity "tratamiento" as tratamiento {
+  * id_tratamiento : INTEGER <<PK>>
+  --
+  * id_atencion : INTEGER <<FK>>
+  * descripcion : TEXT
+    medicamento : TEXT
+    dosis : TEXT
+    frecuencia : TEXT
+  * fecha_inicio : DATE
+    fecha_fin : DATE
+}
+
+entity "vacuna" as vacuna {
+  * id_vacuna : INTEGER <<PK>>
+  --
+  * nombre : TEXT <<UK>>
+    laboratorio_fabricante : TEXT
+}
+
+entity "vacuna_obligatoria" as vacuna_obligatoria {
+  * id_vacuna_obligatoria : INTEGER <<PK>>
+  --
+  * id_especie : INTEGER <<FK>>
+  * id_vacuna : INTEGER <<FK>>
+  * edad_minima_semanas : INTEGER
+    frecuencia_refuerzo_dias : INTEGER
+  ..
+  UK (id_especie, id_vacuna)
+}
+
+entity "aplicacion_vacuna" as aplicacion_vacuna {
+  * id_aplicacion : INTEGER <<PK>>
+  --
+  * id_atencion : INTEGER <<FK>>
+  * id_vacuna : INTEGER <<FK>>
+  * fecha : DATE
+  * lote : TEXT
+    fecha_proxima_dosis : DATE
+}
+}
+
+' =====================================================================
+package "Derivación, transporte y laboratorio" #F4FAF4 {
+
+entity "laboratorio_central" as laboratorio_central {
+  * id_laboratorio : INTEGER <<PK>>
+  --
+  * nombre : TEXT
+  * direccion : TEXT
+    telefono : TEXT
+}
+
+entity "bioquimico" as bioquimico {
+  * id_bioquimico : INTEGER <<PK>>
+  --
+  * id_laboratorio : INTEGER <<FK>>
+  * dni : TEXT <<UK>>
+  * nombre : TEXT
+  * apellido : TEXT
+    telefono : TEXT
+    email : TEXT
+  * matricula : TEXT <<UK>>
+}
+
+entity "tipo_analisis" as tipo_analisis {
+  * id_tipo_analisis : INTEGER <<PK>>
+  --
+  * codigo : TEXT <<UK>>
+  * nombre : TEXT
+  * tipo_muestra_requerida : TEXT
+  * temp_min_c : REAL
+  * temp_max_c : REAL
+  * horas_max_viabilidad : INTEGER
+  * precio : REAL
+}
+
+entity "orden_derivacion" as orden_derivacion {
+  * id_orden : INTEGER <<PK>>
+  --
+  * id_atencion : INTEGER <<FK>>
+  * id_laboratorio : INTEGER <<FK>>
+  * numero : TEXT <<UK>>
+  * fecha_emision : DATETIME
+  * prioridad : TEXT {NORMAL, URGENTE}
+    indicaciones_clinicas : TEXT
+  * estado : TEXT {EMITIDA, EN_PROCESO,\n  COMPLETA, CANCELADA}
+}
+
+entity "analisis_solicitado" as analisis_solicitado {
+  * id_analisis_solicitado : INTEGER <<PK>>
+  --
+  * id_orden : INTEGER <<FK>>
+  * id_tipo_analisis : INTEGER <<FK>>
+  * id_muestra : INTEGER <<FK>>
+    observaciones : TEXT
+  ..
+  UK (id_orden, id_tipo_analisis)
+}
+
+entity "muestra" as muestra {
+  * id_muestra : INTEGER <<PK>>
+  --
+  * id_orden : INTEGER <<FK>>
+  * id_veterinario : INTEGER <<FK>>
+    id_remito : INTEGER <<FK>>
+  * codigo : TEXT <<UK>>
+  * tipo : TEXT {SANGRE, SUERO, ORINA,\n  MATERIA_FECAL, TEJIDO, HISOPADO}
+  * fecha_hora_extraccion : DATETIME
+    volumen_ml : REAL
+  * estado : TEXT {EXTRAIDA, EMPAQUETADA,\n  EN_TRANSITO, RECIBIDA,\n  ANALIZADA, RECHAZADA}
+}
+
+entity "cambio_estado_muestra" as cambio_estado_muestra {
+  * id_cambio : INTEGER <<PK>>
+  --
+  * id_muestra : INTEGER <<FK>>
+  * fecha_hora : DATETIME
+    estado_anterior : TEXT
+  * estado_nuevo : TEXT
+  * responsable : TEXT
+    observacion : TEXT
+}
+
+entity "conservadora" as conservadora {
+  * id_conservadora : INTEGER <<PK>>
+  --
+  * codigo : TEXT <<UK>>
+  * capacidad : INTEGER
+  * temp_min_c : REAL
+  * temp_max_c : REAL
+  * disponible : BOOLEAN
+}
+
+entity "remito_biologico" as remito_biologico {
+  * id_remito : INTEGER <<PK>>
+  --
+  * id_conservadora : INTEGER <<FK>>
+  * id_clinica_origen : INTEGER <<FK>>
+  * id_laboratorio_destino : INTEGER <<FK>>
+  * numero : TEXT <<UK>>
+  * fecha_hora_emision : DATETIME
+  * estado : TEXT {EN_PREPARACION, PRECINTADO,\n  EN_TRANSITO, RECIBIDO, RECHAZADO}
+}
+
+entity "precinto_sanitario" as precinto_sanitario {
+  * id_precinto : INTEGER <<PK>>
+  --
+  * id_remito : INTEGER <<FK, UK>>
+  * numero : TEXT <<UK>>
+  * fecha_hora_colocacion : DATETIME
+  * estado : TEXT {INTACTO, ROTO}
+}
+
+entity "transportista" as transportista {
+  * id_transportista : INTEGER <<PK>>
+  --
+  * razon_social : TEXT
+  * cuit : TEXT <<UK>>
+    telefono : TEXT
+    patente_vehiculo : TEXT
+}
+
+entity "tramo_envio" as tramo_envio {
+  * id_tramo : INTEGER <<PK>>
+  --
+  * id_remito : INTEGER <<FK>>
+  * id_transportista : INTEGER <<FK>>
+  * nro_orden : INTEGER
+  * origen : TEXT
+  * destino : TEXT
+  * fecha_hora_salida : DATETIME
+    fecha_hora_llegada : DATETIME
+    temperatura_salida_c : REAL
+    temperatura_llegada_c : REAL
+  * entregado_por : TEXT
+    recibido_por : TEXT
+    observaciones : TEXT
+  ..
+  UK (id_remito, nro_orden)
+}
+
+entity "recepcion_laboratorio" as recepcion_laboratorio {
+  * id_recepcion : INTEGER <<PK>>
+  --
+  * id_remito : INTEGER <<FK, UK>>
+  * id_bioquimico : INTEGER <<FK>>
+  * fecha_hora : DATETIME
+  * estado_precinto_verificado : TEXT {INTACTO, ROTO}
+    temperatura_arribo_c : REAL
+  * aceptada : BOOLEAN
+    motivo_rechazo : TEXT
+}
+
+entity "resultado_analisis" as resultado_analisis {
+  * id_resultado : INTEGER <<PK>>
+  --
+  * id_analisis_solicitado : INTEGER <<FK, UK>>
+  * id_bioquimico : INTEGER <<FK>>
+  * fecha_hora : DATETIME
+    interpretacion : TEXT
+    observaciones : TEXT
+}
+
+entity "detalle_resultado" as detalle_resultado {
+  * id_detalle : INTEGER <<PK>>
+  --
+  * id_resultado : INTEGER <<FK>>
+  * parametro : TEXT
+  * valor : REAL
+    unidad : TEXT
+    valor_ref_min : REAL
+    valor_ref_max : REAL
+}
+}
+
+' =====================================================================
+package "Facturación" #FCF7F0 {
+
+entity "servicio_clinico" as servicio_clinico {
+  * id_servicio : INTEGER <<PK>>
+  --
+  * codigo : TEXT <<UK>>
+  * nombre : TEXT
+  * precio_base : REAL
+}
+
+entity "comprobante_atencion" as comprobante_atencion {
+  * id_comprobante : INTEGER <<PK>>
+  --
+  * id_atencion : INTEGER <<FK, UK>>
+  * id_cliente : INTEGER <<FK>>
+  * id_clinica : INTEGER <<FK>>
+  * numero : TEXT <<UK>>
+  * fecha_emision : DATETIME
+  * estrategia_tarifa : TEXT {CONSULTA,\n  CONTROL, URGENCIA}
+  * subtotal : REAL
+  * total : REAL
+}
+
+entity "item_comprobante" as item_comprobante {
+  * id_item : INTEGER <<PK>>
+  --
+  * id_comprobante : INTEGER <<FK>>
+  * tipo : TEXT {SERVICIO_CLINICO,\n  ANALISIS_LABORATORIO, VACUNA, INSUMO}
+    id_servicio : INTEGER <<FK>>
+    id_tipo_analisis : INTEGER <<FK>>
+    id_vacuna : INTEGER <<FK>>
+  * descripcion : TEXT
+  * cantidad : INTEGER
+  * precio_unitario : REAL
+}
+}
+
+' =====================================================================
+' Relaciones (pata de gallo)
+' ---------------------------------------------------------------------
+' Atención clínica
+cliente ||--o{ mascota : responsable
+especie ||--o{ mascota
+mascota ||--|| historia_clinica
+historia_clinica ||--o{ atencion
+veterinario ||--o{ veterinario_clinica
+clinica ||--o{ veterinario_clinica
+veterinario ||--o{ turno
+mascota ||--o{ turno
+clinica ||--o{ turno
+turno |o--o| atencion : origina
+veterinario ||--o{ atencion : atiende
+clinica ||--o{ atencion
+atencion ||--o{ tratamiento
+atencion ||--o{ aplicacion_vacuna
+vacuna ||--o{ aplicacion_vacuna
+especie ||--o{ vacuna_obligatoria : esquema
+vacuna ||--o{ vacuna_obligatoria
+
+' Derivación y laboratorio
+atencion ||--o{ orden_derivacion : emite
+laboratorio_central ||--o{ orden_derivacion : destino
+orden_derivacion ||--|{ analisis_solicitado
+orden_derivacion ||--|{ muestra
+tipo_analisis ||--o{ analisis_solicitado
+muestra ||--|{ analisis_solicitado : se procesa sobre
+veterinario ||--o{ muestra : extrae
+muestra ||--|{ cambio_estado_muestra : historial
+remito_biologico |o--|{ muestra : contiene
+conservadora ||--o{ remito_biologico
+clinica ||--o{ remito_biologico : origen
+laboratorio_central ||--o{ remito_biologico : destino
+remito_biologico ||--o| precinto_sanitario
+remito_biologico ||--o{ tramo_envio : cadena de envío
+transportista ||--o{ tramo_envio
+remito_biologico ||--o| recepcion_laboratorio
+bioquimico ||--o{ recepcion_laboratorio : recibe
+laboratorio_central ||--o{ bioquimico
+analisis_solicitado ||--o| resultado_analisis
+bioquimico ||--o{ resultado_analisis : firma
+resultado_analisis ||--|{ detalle_resultado
+
+' Facturación
+atencion ||--o| comprobante_atencion : factura
+cliente ||--o{ comprobante_atencion
+clinica ||--o{ comprobante_atencion
+comprobante_atencion ||--|{ item_comprobante
+servicio_clinico |o--o{ item_comprobante
+tipo_analisis |o--o{ item_comprobante
+vacuna |o--o{ item_comprobante
+
+' ---------------------------------------------------------------------
+note bottom of cambio_estado_muestra
+  Append-only: triggers impiden
+  UPDATE y DELETE → trazabilidad
+  inmutable de estados.
+end note
+
+note bottom of recepcion_laboratorio
+  CHECK: precinto ROTO ⇒ aceptada = 0.
+  Las muestras del remito pasan a
+  RECHAZADA y no admiten resultados.
+end note
+
+note bottom of turno
+  Trigger: sin superposición de
+  turnos del mismo veterinario.
+end note
+@enduml
