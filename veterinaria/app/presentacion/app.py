@@ -57,6 +57,9 @@ class VeterinariaApp:
         self.page.title = config.APP_TITULO
         self.page.theme_mode = ft.ThemeMode.LIGHT
         self.page.theme = ft.Theme(color_scheme_seed=ft.Colors.TEAL)
+        self.page.locale_configuration = ft.LocaleConfiguration(
+            supported_locales=[ft.Locale("es", "AR"), ft.Locale("en", "US")],
+            current_locale=ft.Locale("es", "AR"))
         self.page.padding = 0
         self.page.window.width = 1440
         self.page.window.height = 900
