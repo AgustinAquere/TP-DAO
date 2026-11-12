@@ -139,11 +139,11 @@ class EnviosVista(Vista):
 
     def _dialogo_precintar(self, remito: dict) -> None:
         numero = campo("N.º de precinto (vacío = automático)")
-        responsable = campo("Responsable del empaquetado *")
+        responsable = selector("Responsable del empaquetado *", self._opciones_responsables(remito["id_clinica_origen"]))
         momento = campo_fecha_hora("Fecha y hora de colocación *", fechas.ahora())
 
         def precintar(e):
-            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_texto(responsable, True),
+            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_id(responsable, True),
                                                              leer_texto(numero), leer_fecha_hora(momento, True))
             self._despues(f"Remito precintado con el precinto {precinto.numero}. Muestras empaquetadas.")
 
@@ -152,6 +152,11 @@ class EnviosVista(Vista):
                                  numero, fila(responsable, momento)], tight=True, spacing=12),
                       [boton_cancelar(self.page), ft.FilledButton("Precintar", icon=ft.Icons.LOCK,
                                                                   on_click=self.seguro(precintar))])
+
+    def _opciones_responsables(self, id_clinica: int) -> list[tuple]:
+        """Solo el personal de la clínica de origen puede precintar el remito."""
+        return [(v.id, f"{v.nombre_completo()} · {v.matricula}")
+                for v in self.servicios.derivaciones.veterinarios_de_clinica(id_clinica)]
 
     def _opciones_transportistas(self) -> list[tuple]:
         return [(t.id, f"{t.razon_social} · {t.patente_vehiculo or ''}") for t in self.servicios.catalogos.listar("transportista")]

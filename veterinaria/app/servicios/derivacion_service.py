@@ -5,22 +5,26 @@ from app.dominio.envio import Conservadora, PrecintoSanitario, TramoEnvio
 from app.dominio.estados_remito import estado_remito_desde
 from app.dominio.excepciones import EntidadNoEncontradaError, TransicionInvalidaError, ValidacionError
 from app.dominio.muestra import Muestra
+from app.dominio.personas import Veterinario
 from app.dominio.remito import RemitoBiologico
 from app.persistencia.conexion import ConexionBD
 from app.persistencia.daos.catalogos_dao import ConservadoraDAO, TransportistaDAO
 from app.persistencia.daos.derivacion_dao import MuestraDAO, OrdenDerivacionDAO
+from app.persistencia.daos.personas_dao import VeterinarioDAO
 from app.persistencia.daos.remito_dao import RemitoDAO
 from app.utils import fechas
 
 
 class DerivacionService:
     def __init__(self, muestras: MuestraDAO, remitos: RemitoDAO, conservadoras: ConservadoraDAO,
-                 ordenes: OrdenDerivacionDAO, transportistas: TransportistaDAO, conexion: ConexionBD):
+                 ordenes: OrdenDerivacionDAO, transportistas: TransportistaDAO, veterinarios: VeterinarioDAO,
+                 conexion: ConexionBD):
         self._muestras = muestras
         self._remitos = remitos
         self._conservadoras = conservadoras
         self._ordenes = ordenes
         self._transportistas = transportistas
+        self._veterinarios = veterinarios
         self._conexion = conexion
 
     # --- Consultas -------------------------------------------------------------------
@@ -35,6 +39,10 @@ class DerivacionService:
 
     def conservadoras_disponibles(self) -> list[Conservadora]:
         return self._conservadoras.listar_disponibles()
+
+    def veterinarios_de_clinica(self, id_clinica: int) -> list[Veterinario]:
+        """Personal de la clínica que puede responsabilizarse del empaquetado y el precinto."""
+        return self._veterinarios.listar_por_clinica(id_clinica)
 
     def obtener_remito(self, id_remito: int) -> RemitoBiologico:
         remito = self._remitos.obtener_por_id(id_remito)
@@ -124,11 +132,21 @@ class DerivacionService:
             self._remitos.eliminar(remito.id)
             self._conservadoras.marcar_disponible(remito.id_conservadora, True)
 
-    def precintar(self, id_remito: int, responsable: str, numero_precinto: str | None = None,
+    def _veterinario_de_la_clinica(self, id_veterinario: int | None, id_clinica: int) -> Veterinario:
+        veterinario = self._veterinarios.obtener_por_id(id_veterinario) if id_veterinario else None
+        if veterinario is None:
+            raise ValidacionError("Seleccione el responsable del empaquetado.")
+        if not veterinario.trabaja_en(id_clinica):
+            raise ValidacionError(f"{veterinario.nombre_completo()} no trabaja en la clínica de origen del remito.")
+        return veterinario
+
+    def precintar(self, id_remito: int, id_veterinario: int, numero_precinto: str | None = None,
                   fecha_hora: datetime | None = None) -> PrecintoSanitario:
+        """Precinta el remito. El responsable debe ser un veterinario de la clínica de origen."""
         remito = self.obtener_remito(id_remito)
+        responsable = self._veterinario_de_la_clinica(id_veterinario, remito.id_clinica_origen)
         numero = (numero_precinto or "").strip() or self._remitos.siguiente_numero_precinto()
-        precinto = remito.precintar(numero, responsable=responsable, fecha_hora=fecha_hora)
+        precinto = remito.precintar(numero, responsable=responsable.nombre_completo(), fecha_hora=fecha_hora)
         with self._conexion.transaccion():
             self._remitos.guardar_precinto(precinto)
             self._remitos.actualizar_estado(remito)
