@@ -71,5 +71,5 @@ class VeterinariaApp:
         vista = self._vistas[clave]
         self.rail.selected_index = indice
         self.contenido.content = vista.control
-        vista.seguro(vista.al_mostrar)(**contexto)
         self.page.update()
+        vista.seguro(vista.al_mostrar)(**contexto)
