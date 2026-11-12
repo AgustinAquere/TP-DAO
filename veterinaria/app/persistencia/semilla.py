@@ -340,7 +340,7 @@ class _Sembrador:
         if salida > self.ahora:
             return
         transportista = self.rnd.choice(self.transportistas)
-        self.s.derivaciones.despachar(id_remito, transportista.id, veterinario.nombre_completo(),
+        self.s.derivaciones.despachar(id_remito, transportista.id, veterinario.id,
                                       temperatura_salida=temperatura(), fecha_hora=salida)
         llegada = salida + timedelta(hours=self.rnd.uniform(2.5, 7) if falla != "demora" else 27)
         if self.rnd.random() < 0.35 or falla == "demora":  # cambio de transportista en un centro de distribución
@@ -419,7 +419,7 @@ class _Sembrador:
             self.s.derivaciones.precintar(remito.id, veterinario.id, fecha_hora=momento + timedelta(hours=1))
             if etapa == "precintado":
                 continue
-            self.s.derivaciones.despachar(remito.id, self.transportistas[0].id, veterinario.nombre_completo(),
+            self.s.derivaciones.despachar(remito.id, self.transportistas[0].id, veterinario.id,
                                           temperatura_salida=4.5, fecha_hora=momento + timedelta(hours=1, minutes=30))
             if etapa == "transito":
                 continue

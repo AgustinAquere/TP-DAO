@@ -154,7 +154,7 @@ class EnviosVista(Vista):
                                                                   on_click=self.seguro(precintar))])
 
     def _opciones_responsables(self, id_clinica: int) -> list[tuple]:
-        """Solo el personal de la clínica de origen puede precintar el remito."""
+        """Solo el personal de la clínica de origen puede precintar el remito y entregarlo al transportista."""
         return [(v.id, f"{v.nombre_completo()} · {v.matricula}")
                 for v in self.servicios.derivaciones.veterinarios_de_clinica(id_clinica)]
 
@@ -163,14 +163,14 @@ class EnviosVista(Vista):
 
     def _dialogo_despachar(self, remito: dict) -> None:
         transportista = selector("Transportista *", self._opciones_transportistas())
-        entregado = campo("Entregado por *")
+        entregado = selector("Entregado por *", self._opciones_responsables(remito["id_clinica_origen"]))
         temperatura = campo_numero("Temperatura de salida (°C)")
         salida = campo_fecha_hora("Fecha y hora de salida *", fechas.ahora())
         destino = campo("Destino del tramo", remito["laboratorio"])
 
         def despachar(e):
             self.servicios.derivaciones.despachar(remito["id_remito"], leer_id(transportista, True),
-                                                  leer_texto(entregado, True), leer_decimal(temperatura),
+                                                  leer_id(entregado, True), leer_decimal(temperatura),
                                                   leer_fecha_hora(salida, True), leer_texto(destino))
             self._despues("Remito despachado: el primer tramo de la cadena de custodia quedó registrado.")
 

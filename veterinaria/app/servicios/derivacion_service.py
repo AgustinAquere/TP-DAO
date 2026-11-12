@@ -132,10 +132,10 @@ class DerivacionService:
             self._remitos.eliminar(remito.id)
             self._conservadoras.marcar_disponible(remito.id_conservadora, True)
 
-    def _veterinario_de_la_clinica(self, id_veterinario: int | None, id_clinica: int) -> Veterinario:
+    def _veterinario_de_la_clinica(self, id_veterinario: int | None, id_clinica: int, rol: str) -> Veterinario:
         veterinario = self._veterinarios.obtener_por_id(id_veterinario) if id_veterinario else None
         if veterinario is None:
-            raise ValidacionError("Seleccione el responsable del empaquetado.")
+            raise ValidacionError(f"Seleccione {rol}.")
         if not veterinario.trabaja_en(id_clinica):
             raise ValidacionError(f"{veterinario.nombre_completo()} no trabaja en la clínica de origen del remito.")
         return veterinario
@@ -144,7 +144,8 @@ class DerivacionService:
                   fecha_hora: datetime | None = None) -> PrecintoSanitario:
         """Precinta el remito. El responsable debe ser un veterinario de la clínica de origen."""
         remito = self.obtener_remito(id_remito)
-        responsable = self._veterinario_de_la_clinica(id_veterinario, remito.id_clinica_origen)
+        responsable = self._veterinario_de_la_clinica(id_veterinario, remito.id_clinica_origen,
+                                                      "el responsable del empaquetado")
         numero = (numero_precinto or "").strip() or self._remitos.siguiente_numero_precinto()
         precinto = remito.precintar(numero, responsable=responsable.nombre_completo(), fecha_hora=fecha_hora)
         with self._conexion.transaccion():
@@ -155,11 +156,14 @@ class DerivacionService:
         return precinto
 
     # --- Proceso 5: cadena de envío -----------------------------------------------------------
-    def despachar(self, id_remito: int, id_transportista: int, entregado_por: str,
+    def despachar(self, id_remito: int, id_transportista: int, id_veterinario: int,
                   temperatura_salida: float | None = None, fecha_hora: datetime | None = None,
                   destino: str | None = None, observaciones: str | None = None) -> TramoEnvio:
+        """Entrega el remito al transportista. Quien lo entrega debe ser un veterinario de la clínica de origen."""
         remito = self.obtener_remito(id_remito)
         self._validar_transportista(id_transportista)
+        entregado_por = self._veterinario_de_la_clinica(id_veterinario, remito.id_clinica_origen,
+                                                        "quién entrega el remito").nombre_completo()
         tramo = TramoEnvio(id_transportista=id_transportista, origen=remito.nombre_clinica,
                            destino=destino or remito.nombre_laboratorio, fecha_hora_salida=fecha_hora or fechas.ahora(),
                            temperatura_salida_c=temperatura_salida, entregado_por=entregado_por,
