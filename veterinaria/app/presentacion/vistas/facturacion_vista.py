@@ -59,19 +59,22 @@ class FacturacionVista(Vista):
                                       ft.IconButton(ft.Icons.SEARCH, tooltip="Buscar", on_click=recargar)]),
                               self.emitidos.control], expand=True, spacing=10)
         pestania = lambda control: ft.Container(control, padding=ft.Padding.only(top=12))
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("facturacion"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Emitir comprobante", icon=ft.Icons.POINT_OF_SALE),
                             ft.Tab(label="Comprobantes emitidos", icon=ft.Icons.RECEIPT_LONG)]),
             ft.TabBarView(controls=[pestania(emitir), pestania(emitidos)], expand=True)], expand=True))
         return ft.Column([encabezado("Facturación", "Comprobantes de atención con tarifa según el tipo de atención"),
                           self.pestanias], expand=True, spacing=10)
 
-    def al_mostrar(self, id_atencion: int | None = None, **contexto) -> None:
+    def al_mostrar(self, id_atencion: int | None = None, pestania: int | None = None, **contexto) -> None:
         cargar_opciones(self.servicio, [(s.id, f"{s.nombre} ({formato.moneda(s.precio_base)})")
                                         for s in self.servicios.facturacion.servicios_clinicos()])
         cargar_opciones(self.filtro_clinica, [("", "Todas")] + self.opciones_clinicas())
         self._cargar_pendientes()
         self._cargar_emitidos()
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         if id_atencion:
             self.pestanias.selected_index = 0
             self._seleccionar(id_atencion)

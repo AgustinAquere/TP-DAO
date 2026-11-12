@@ -19,7 +19,8 @@ def _rango(m: dict) -> str:
 
 class EnviosVista(Vista):
     def construir(self) -> ft.Control:
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("envios"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Armar remito", icon=ft.Icons.INVENTORY_2),
                             ft.Tab(label="Remitos y cadena de envío", icon=ft.Icons.LOCAL_SHIPPING)]),
             ft.TabBarView(controls=[self._construir_armado(), self._construir_remitos()], expand=True),
@@ -28,7 +29,9 @@ class EnviosVista(Vista):
                                      "Conservadoras isotérmicas, remito biológico, precinto sanitario y tramos de envío"),
                           self.pestanias], expand=True, spacing=10)
 
-    def al_mostrar(self, **contexto) -> None:
+    def al_mostrar(self, pestania: int | None = None, **contexto) -> None:
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         clinicas = self.opciones_clinicas()
         cargar_opciones(self.clinica, clinicas)
         if self.clinica.value is None and clinicas:
