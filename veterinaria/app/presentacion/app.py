@@ -54,31 +54,31 @@ class Grupo:
 INICIO = Entrada("inicio", "Inicio", "inicio")
 
 GRUPOS = (
-    Grupo("pacientes", "1. Pacientes y Agenda", ft.Icons.CALENDAR_MONTH_OUTLINED, (
+    Grupo("pacientes", "Pacientes y Agenda", ft.Icons.CALENDAR_MONTH_OUTLINED, (
         Entrada("clientes", "Clientes", "clientes"),
         Entrada("mascotas", "Mascotas e HC", "mascotas"),
         Entrada("turnos", "Agenda de turnos", "turnos"),
     )),
-    Grupo("clinica", "2. Clínica Médica", ft.Icons.MEDICAL_SERVICES_OUTLINED, (
+    Grupo("clinica", "Clínica Médica", ft.Icons.MEDICAL_SERVICES_OUTLINED, (
         Entrada("atenciones_nueva", "Registrar nueva atención", "atenciones", {"pestania": 0}),
         Entrada("atenciones_historial", "Historial de atenciones", "atenciones", {"pestania": 1}),
     )),
-    Grupo("logistica", "3. Logística de Muestras", ft.Icons.LOCAL_SHIPPING_OUTLINED, (
+    Grupo("logistica", "Logística de Muestras", ft.Icons.LOCAL_SHIPPING_OUTLINED, (
         Entrada("envios_armar", "Armar remito biológico", "envios", {"pestania": 0}),
         Entrada("envios_remitos", "Remitos y cadena de envío", "envios", {"pestania": 1}),
         Entrada("trazabilidad", "Trazabilidad de muestras", "trazabilidad"),
     )),
-    Grupo("laboratorio", "4. Laboratorio Central", ft.Icons.BIOTECH_OUTLINED, (
+    Grupo("laboratorio", "Laboratorio Central", ft.Icons.BIOTECH_OUTLINED, (
         Entrada("lab_recepcion", "Recepción de remitos", "laboratorio", {"pestania": 0}),
         Entrada("lab_pendientes", "Análisis pendientes", "laboratorio", {"pestania": 1}),
         Entrada("lab_resultados", "Resultados emitidos", "laboratorio", {"pestania": 2}),
     )),
-    Grupo("gestion", "5. Facturación y Reportes", ft.Icons.RECEIPT_LONG_OUTLINED, (
+    Grupo("gestion", "Facturación y Reportes", ft.Icons.RECEIPT_LONG_OUTLINED, (
         Entrada("fact_emitir", "Emitir comprobante", "facturacion", {"pestania": 0}),
         Entrada("fact_emitidos", "Comprobantes emitidos", "facturacion", {"pestania": 1}),
         Entrada("reportes", "Reportes estadísticos", "reportes"),
     )),
-    Grupo("catalogos", "6. Catálogos", ft.Icons.TUNE_OUTLINED, (
+    Grupo("catalogos", "Catálogos", ft.Icons.TUNE_OUTLINED, (
         Entrada("cat_red", "Red y Profesionales", "catalogos", {"grupo": "red"}),
         Entrada("cat_logistica", "Logística", "catalogos", {"grupo": "logistica"}),
         Entrada("cat_practicas", "Prácticas y Vacunación", "catalogos", {"grupo": "practicas"}),
