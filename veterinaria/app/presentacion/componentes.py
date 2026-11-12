@@ -72,9 +72,19 @@ def abrir_dialogo(page: ft.Page, titulo: str, contenido: ft.Control, acciones: l
                   ancho: int = 560, alto: int | None = None) -> ft.AlertDialog:
     if isinstance(contenido, ft.Column):  # los campos del formulario ocupan todo el ancho del diálogo
         contenido.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
-    dialogo = ft.AlertDialog(modal=True, title=ft.Text(titulo, weight=ft.FontWeight.BOLD),
-                             content=ft.Container(contenido, width=ancho, height=alto), actions=acciones,
-                             actions_alignment=ft.MainAxisAlignment.END)
+        if alto is None:
+            # Sin alto fijo el diálogo se encoge al contenido; el scroll lo maneja el AlertDialog.
+            contenido.tight = True
+            contenido.scroll = None
+    ancho_ventana = page.width or page.window.width or ancho
+    alto_ventana = page.height or page.window.height or (alto or 700)
+    ancho_max = int(ancho_ventana * 0.9)
+    alto_max = int(alto_ventana * 0.82)
+    dialogo = ft.AlertDialog(
+        modal=True, scrollable=alto is None, title=ft.Text(titulo, weight=ft.FontWeight.BOLD),
+        content=ft.Container(contenido, width=min(ancho, ancho_max),
+                             height=min(alto, alto_max) if alto else None),
+        actions=acciones, actions_alignment=ft.MainAxisAlignment.END)
     page.show_dialog(dialogo)
     return dialogo
 

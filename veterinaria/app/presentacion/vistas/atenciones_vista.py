@@ -21,22 +21,25 @@ PRIORIDADES = [(p.value, formato.etiqueta(p)) for p in Prioridad]
 class FormularioDerivacion:
     """Campos de una orden de derivación (se usan al registrar la atención y para órdenes posteriores)."""
 
-    def __init__(self, vista: Vista):
+    def __init__(self, vista: Vista, en_dialogo: bool = False):
         laboratorios = vista.opciones_laboratorios()
         self.laboratorio = selector("Laboratorio de destino *", laboratorios,
-                                    laboratorios[0][0] if laboratorios else None)
-        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value)
+                                    laboratorios[0][0] if laboratorios else None, col={"xs": 12, "md": 7})
+        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value, col={"xs": 12, "md": 5})
         self.indicaciones = campo("Indicaciones clínicas", multiline=True, min_lines=1, max_lines=3)
+        # En el modal cada análisis ocupa el ancho completo: el texto no entra en dos columnas.
+        # En el formulario, dos columnas solo con la ventana ancha; si se achica, vuelve a una.
+        columnas_analisis = 12 if en_dialogo else {"xs": 12, "xxl": 6}
         self.analisis = [
             ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
                               f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · {formato.moneda(t.precio)}",
-                        data=t.id, col={"md": 12, "lg": 6})
+                        data=t.id, col=columnas_analisis)
             for t in vista.servicios.catalogos.listar("tipo_analisis")]
         self.control = ft.Column([
-            fila(self.laboratorio, self.prioridad), self.indicaciones,
+            ft.ResponsiveRow([self.laboratorio, self.prioridad], spacing=12, run_spacing=8), self.indicaciones,
             ft.Text("Análisis a solicitar (se registra una extracción por cada tipo de muestra)", size=13,
                     weight=ft.FontWeight.W_600),
-            ft.ResponsiveRow(self.analisis, run_spacing=0)], spacing=10)
+            ft.ResponsiveRow(self.analisis, spacing=12, run_spacing=6)], spacing=10, tight=True)
 
     def solicitud(self) -> SolicitudDerivacion:
         ids = [check.data for check in self.analisis if check.value]
@@ -316,15 +319,16 @@ class AtencionesVista(Vista):
             *([ft.Text(f"• {a.nombre_vacuna} (lote {a.lote})") for a in atencion.aplicaciones]
               or [ft.Text("Ninguna.", italic=True)]),
             ft.Text("Órdenes de derivación", weight=ft.FontWeight.BOLD),
-            *([ft.Row([ft.Text(f"• {o['numero']} » {o['laboratorio']}: {o['analisis']}", expand=True), chip(o["estado"])])
+            *([ft.Row([ft.Text(f"• {o['numero']} » {o['laboratorio']}: {o['analisis']}", expand=True), chip(o["estado"])],
+                      vertical_alignment=ft.CrossAxisAlignment.START)
                for o in self.servicios.atenciones.ordenes_de(atencion.id)] or [ft.Text("Ninguna.", italic=True)]),
         ]
         abrir_dialogo(self.page, f"Atención del {fechas.formatear_fecha(atencion.fecha_hora.date())}",
-                      ft.Column(lineas, scroll=ft.ScrollMode.AUTO, spacing=6, tight=True),
-                      [boton_cancelar(self.page, "Cerrar")], ancho=680)
+                      ft.Column(lineas, spacing=6, tight=True),
+                      [boton_cancelar(self.page, "Cerrar")], ancho=620)
 
     def _dialogo_orden(self, resumen: dict) -> None:
-        formulario = FormularioDerivacion(self)
+        formulario = FormularioDerivacion(self, en_dialogo=True)
 
         def emitir(e):
             orden = self.servicios.atenciones.emitir_orden(resumen["id_atencion"], formulario.solicitud())
@@ -334,4 +338,4 @@ class AtencionesVista(Vista):
 
         abrir_dialogo(self.page, f"Nueva orden de derivación · {resumen['mascota']}", formulario.control,
                       [boton_cancelar(self.page), ft.FilledButton("Emitir orden", icon=ft.Icons.SEND,
-                                                                  on_click=self.seguro(emitir))], ancho=760)
+                                                                  on_click=self.seguro(emitir))], ancho=640)
