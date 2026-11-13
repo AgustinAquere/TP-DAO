@@ -139,10 +139,35 @@ class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
         conservadora = next(c for c in self.s.derivaciones.conservadoras_disponibles() if c.temp_min_c >= 2 and c.temp_max_c <= 8)
         remito = self.s.derivaciones.armar_remito([m.id for m in orden.muestras], conservadora.id, id_clinica,
                                                   fechas.ahora() - timedelta(hours=2, minutes=30))
-        self.s.derivaciones.precintar(remito.id, "Vet", fecha_hora=fechas.ahora() - timedelta(hours=2))
-        self.s.derivaciones.despachar(remito.id, self.id_de("SELECT MIN(id_transportista) FROM transportista"), "Vet",
-                                      fecha_hora=fechas.ahora() - timedelta(hours=1, minutes=30))
+        self.s.derivaciones.precintar(remito.id, veterinario.id, fecha_hora=fechas.ahora() - timedelta(hours=2))
+        self.s.derivaciones.despachar(remito.id, self.id_de("SELECT MIN(id_transportista) FROM transportista"),
+                                      veterinario.id, fecha_hora=fechas.ahora() - timedelta(hours=1, minutes=30))
         return remito
+
+    def test_precinta_y_despacha_solo_personal_de_la_clinica_de_origen(self):
+        _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])
+        conservadora = next(c for c in self.s.derivaciones.conservadoras_disponibles() if c.temp_min_c >= 2 and c.temp_max_c <= 8)
+        remito = self.s.derivaciones.armar_remito([m.id for m in orden.muestras], conservadora.id, id_clinica)
+        habilitados = self.s.derivaciones.veterinarios_de_clinica(id_clinica)
+        self.assertIn(veterinario.id, [v.id for v in habilitados])
+        ajeno = next(v for v in self.s.catalogos.listar("veterinario") if not v.trabaja_en(id_clinica))
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.precintar(remito.id, ajeno.id)
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.precintar(remito.id, None)
+        self.s.derivaciones.precintar(remito.id, veterinario.id)
+        muestra = self.s.derivaciones.trazabilidad(orden.muestras[0].id)
+        self.assertEqual(muestra.historial().ultimo().responsable, veterinario.nombre_completo())
+
+        id_transportista = self.id_de("SELECT MIN(id_transportista) FROM transportista")
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.despachar(remito.id, id_transportista, ajeno.id)
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.despachar(remito.id, id_transportista, None)
+        tramo = self.s.derivaciones.despachar(remito.id, id_transportista, veterinario.id)
+        self.assertEqual(tramo.entregado_por, veterinario.nombre_completo())
+        muestra = self.s.derivaciones.trazabilidad(orden.muestras[0].id)
+        self.assertEqual(muestra.historial().ultimo().responsable, veterinario.nombre_completo())
 
     def test_precinto_roto_impide_procesar(self):
         _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])

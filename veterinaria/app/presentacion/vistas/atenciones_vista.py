@@ -112,7 +112,8 @@ class FormularioDerivacion:
 
 class AtencionesVista(Vista):
     def construir(self) -> ft.Control:
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("atenciones"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Registrar atención", icon=ft.Icons.NOTE_ADD),
                             ft.Tab(label="Atenciones registradas", icon=ft.Icons.HISTORY)]),
             ft.TabBarView(controls=[self._construir_formulario(), self._construir_historial()], expand=True),
@@ -165,7 +166,7 @@ class AtencionesVista(Vista):
         self.panel_vacunas.controls = [ft.Text("Seleccione una mascota para controlar su esquema.", italic=True)]
         return ft.Container(formulario, padding=ft.Padding.only(top=12, right=8))
 
-    def al_mostrar(self, id_turno: int | None = None, **contexto) -> None:
+    def al_mostrar(self, id_turno: int | None = None, pestania: int | None = None, **contexto) -> None:
         cargar_opciones(self.mascota, self.opciones_mascotas())
         cargar_opciones(self.veterinario, self.opciones_veterinarios())
         cargar_opciones(self.otra_vacuna, [(v.id, v.nombre) for v in self.servicios.catalogos.listar("vacuna")])
@@ -176,6 +177,8 @@ class AtencionesVista(Vista):
         cargar_opciones(self.turno, [(clave, f"{fechas.formatear_fecha_hora(fechas.fecha_hora_desde_sql(t['fecha_hora_inicio']))}"
                                              f" · {t['mascota']} · {t['veterinario']}")
                                      for clave, t in self._turnos.items()])
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         if id_turno:
             self.pestanias.selected_index = 0
             self.turno.value = str(id_turno)
