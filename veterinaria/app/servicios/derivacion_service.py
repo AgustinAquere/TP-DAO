@@ -41,7 +41,7 @@ class DerivacionService:
         return self._conservadoras.listar_disponibles()
 
     def veterinarios_de_clinica(self, id_clinica: int) -> list[Veterinario]:
-        """Personal de la clínica que puede responsabilizarse del empaquetado y el precinto."""
+        """Personal de la clínica que puede responsabilizarse de la extracción, el empaquetado y el precinto."""
         return self._veterinarios.listar_por_clinica(id_clinica)
 
     def obtener_remito(self, id_remito: int) -> RemitoBiologico:
@@ -132,12 +132,13 @@ class DerivacionService:
             self._remitos.eliminar(remito.id)
             self._conservadoras.marcar_disponible(remito.id_conservadora, True)
 
-    def _veterinario_de_la_clinica(self, id_veterinario: int | None, id_clinica: int, rol: str) -> Veterinario:
+    def _veterinario_de_la_clinica(self, id_veterinario: int | None, id_clinica: int, rol: str,
+                                   clinica: str = "la clínica de origen del remito") -> Veterinario:
         veterinario = self._veterinarios.obtener_por_id(id_veterinario) if id_veterinario else None
         if veterinario is None:
             raise ValidacionError(f"Seleccione {rol}.")
         if not veterinario.trabaja_en(id_clinica):
-            raise ValidacionError(f"{veterinario.nombre_completo()} no trabaja en la clínica de origen del remito.")
+            raise ValidacionError(f"{veterinario.nombre_completo()} no trabaja en {clinica}.")
         return veterinario
 
     def precintar(self, id_remito: int, id_veterinario: int, numero_precinto: str | None = None,
@@ -208,10 +209,11 @@ class DerivacionService:
             self._ordenes.actualizar_estado(orden)
 
     # --- Nueva extracción para una muestra rechazada ------------------------------------------
-    def reextraer_muestra(self, id_muestra: int, responsable: str, volumen: float | None = None,
+    def reextraer_muestra(self, id_muestra: int, id_veterinario: int, volumen: float | None = None,
                           fecha_hora: datetime | None = None) -> Muestra:
         """Registra una nueva extracción y le reasigna los análisis que quedaron sin resultado.
 
+        Quien extrae debe ser un veterinario de la clínica donde se tomó la muestra original.
         La muestra rechazada conserva su historial: la trazabilidad no se modifica.
         """
         anterior = self._muestra(id_muestra)
@@ -221,8 +223,11 @@ class DerivacionService:
         pendientes = [a for a in orden.analisis if a.id_muestra == anterior.id and not a.tiene_resultado()]
         if not pendientes:
             raise ValidacionError("La muestra ya fue reemplazada por una nueva extracción.")
+        id_clinica, _ = self._muestras.origen_y_destino(anterior.id)
+        responsable = self._veterinario_de_la_clinica(id_veterinario, id_clinica, "el responsable de la extracción",
+                                                      "la clínica donde se extrajo la muestra")
         nueva = orden.registrar_extraccion(anterior.tipo, volumen or anterior.volumen_ml,
-                                           id_veterinario=anterior.id_veterinario, responsable=responsable,
+                                           id_veterinario=responsable.id, responsable=responsable.nombre_completo(),
                                            fecha_hora=fecha_hora or fechas.ahora())
         with self._conexion.transaccion():
             nueva.id_orden = orden.id

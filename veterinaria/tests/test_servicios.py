@@ -179,8 +179,14 @@ class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
         id_analisis = self.id_de("SELECT id_analisis_solicitado FROM analisis_solicitado WHERE id_orden = ?", (orden.id,))
         with self.assertRaises(TransicionInvalidaError):
             self.s.laboratorio.registrar_resultado(id_analisis, bioquimico.id, [])
-        nueva = self.s.derivaciones.reextraer_muestra(orden.muestras[0].id, "Vet")  # nueva extracción, misma orden
+        ajeno = self.id_de("SELECT MIN(id_veterinario) FROM veterinario WHERE id_veterinario NOT IN "
+                           "(SELECT id_veterinario FROM veterinario_clinica WHERE id_clinica = ?)", (id_clinica,))
+        with self.assertRaises(ValidacionError):  # quien extrae debe trabajar en la clínica de la muestra
+            self.s.derivaciones.reextraer_muestra(orden.muestras[0].id, ajeno)
+        nueva = self.s.derivaciones.reextraer_muestra(orden.muestras[0].id, veterinario.id)  # nueva extracción, misma orden
         self.assertEqual(nueva.nombre_estado(), "EXTRAIDA")
+        self.assertEqual(nueva.id_veterinario, veterinario.id)
+        self.assertEqual(nueva.historial().ultimo().responsable, veterinario.nombre_completo())
 
     def test_resultado_completa_la_orden(self):
         _, orden, id_clinica, veterinario = self._atencion_con_orden(["BIOQ", "T4"])

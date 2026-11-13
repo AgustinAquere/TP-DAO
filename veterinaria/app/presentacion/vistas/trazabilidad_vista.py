@@ -2,7 +2,7 @@
 import flet as ft
 
 from app.presentacion.componentes import (COLORES_ESTADO, Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo,
-                                          campo_numero, chip, encabezado, fila, leer_decimal, leer_texto)
+                                          campo_numero, chip, encabezado, fila, leer_decimal, leer_id, selector)
 from app.presentacion.vistas.base_vista import Vista
 from app.utils import fechas, formato
 
@@ -62,11 +62,14 @@ class TrazabilidadVista(Vista):
                       [boton_cancelar(self.page, "Cerrar")], ancho=640, alto=520)
 
     def _dialogo_reextraccion(self, muestra: dict) -> None:
-        responsable = campo("Responsable de la extracción *")
+        # Solo el personal de la clínica donde se extrajo la muestra original puede repetir la extracción
+        veterinarios = self.servicios.derivaciones.veterinarios_de_clinica(muestra["id_clinica"])
+        responsable = selector("Responsable de la extracción *",
+                               [(v.id, f"{v.nombre_completo()} · {v.matricula}") for v in veterinarios])
         volumen = campo_numero("Volumen (ml)")
 
         def registrar(e):
-            nueva = self.servicios.derivaciones.reextraer_muestra(muestra["id_muestra"], leer_texto(responsable, True),
+            nueva = self.servicios.derivaciones.reextraer_muestra(muestra["id_muestra"], leer_id(responsable, True),
                                                                   leer_decimal(volumen))
             self.page.pop_dialog()
             self.notificar.exito(f"Nueva muestra {nueva.codigo} registrada; queda pendiente de empaquetar.")
