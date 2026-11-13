@@ -20,7 +20,8 @@ class TurnosVista(Vista):
         self._turno_abierto: int | None = None
         self._bloques: dict[int, ft.Container] = {}
         self.veterinario = selector("Veterinario", [], width=380, on_select=self.seguro(self._cambio_veterinario))
-        self.fecha = campo_fecha("Fecha", date.today(), width=170, on_submit=refrescar, on_blur=refrescar)
+        self.fecha = campo_fecha("Fecha", date.today(), width=170, al_cambiar=refrescar, on_submit=refrescar,
+                                 on_blur=refrescar)
         self.tabla = Tabla(["Inicio", "Fin", "Mascota", "Responsable", "Teléfono", "Clínica", "Estado"],
                            acciones=self._acciones, vacio="El veterinario no tiene turnos en la fecha.")
         self.resumen = ft.Text(color=ft.Colors.ON_SURFACE_VARIANT)
