@@ -2,7 +2,7 @@
 import unittest
 from datetime import date, datetime, timedelta
 
-from app.dominio.enums import TipoAtencion
+from app.dominio.enums import EstadoTurno, TipoAtencion
 from app.dominio.excepciones import (ErrorPersistencia, EsquemaVacunasIncompletoError, TransicionInvalidaError,
                                      TurnoSuperpuestoError, ValidacionError)
 from app.persistencia.conexion import ConexionBD
@@ -60,6 +60,50 @@ class TestValidacionesDeNegocio(BaseDeDatosDePrueba):
             self.bd.ejecutar("INSERT INTO turno (id_veterinario, id_mascota, id_clinica, fecha_hora_inicio, duracion_min)"
                              " VALUES (?, ?, ?, ?, 30)", (id_vet, id_mascota, id_clinica,
                                                           fechas.a_sql(inicio + timedelta(minutes=10))))
+
+    def test_listar_turnos_por_rango_de_fechas(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        lunes = date.today() + timedelta(days=80)
+        lunes -= timedelta(days=lunes.weekday())
+        manana = datetime.combine(lunes, datetime.min.time()).replace(hour=9)
+        miercoles = manana + timedelta(days=2)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, manana, 30)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, miercoles, 60)
+        semana = self.s.turnos.listar(id_veterinario=id_vet, desde=lunes, hasta=lunes + timedelta(days=6))
+        inicios = {t["fecha_hora_inicio"] for t in semana}
+        self.assertIn(fechas.a_sql(manana), inicios)
+        self.assertIn(fechas.a_sql(miercoles), inicios)
+        del_lunes = {t["fecha_hora_inicio"] for t in self.s.turnos.listar(fecha=lunes, id_veterinario=id_vet)}
+        self.assertIn(fechas.a_sql(manana), del_lunes)
+        self.assertNotIn(fechas.a_sql(miercoles), del_lunes)
+
+    def test_ausente_y_cancelado_vuelven_a_reservado(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        dia = date.today() + timedelta(days=50)
+        ausente = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, datetime.combine(dia, datetime.min.time()).replace(hour=9), 30)
+        cancelado = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, datetime.combine(dia, datetime.min.time()).replace(hour=11), 30)
+        self.s.turnos.marcar_ausente(ausente.id)
+        self.s.turnos.cancelar(cancelado.id)
+        self.s.turnos.reactivar(ausente.id)
+        self.s.turnos.reactivar(cancelado.id)
+        estados = {t["id_turno"]: t["estado"] for t in self.s.turnos.listar(fecha=dia, id_veterinario=id_vet)}
+        self.assertEqual(estados[ausente.id], EstadoTurno.RESERVADO)
+        self.assertEqual(estados[cancelado.id], EstadoTurno.RESERVADO)
+
+    def test_cancelado_no_vuelve_si_el_horario_fue_tomado(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        inicio = datetime.combine(date.today() + timedelta(days=60), datetime.min.time()).replace(hour=15)
+        primero = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, inicio, 30)
+        self.s.turnos.cancelar(primero.id)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, inicio, 30)
+        with self.assertRaises(TurnoSuperpuestoError):
+            self.s.turnos.reactivar(primero.id)
 
     def test_control_de_esquema_de_vacunas(self):
         id_cliente = self.id_de("SELECT MIN(id_cliente) FROM cliente")

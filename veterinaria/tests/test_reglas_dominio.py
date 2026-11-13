@@ -3,7 +3,8 @@ import unittest
 from datetime import date, datetime
 
 from app.dominio.enums import TipoItem
-from app.dominio.excepciones import TurnoSuperpuestoError, ValidacionError
+from app.dominio.enums import EstadoTurno
+from app.dominio.excepciones import TransicionInvalidaError, TurnoSuperpuestoError, ValidacionError
 from app.dominio.facturacion import ComprobanteAtencion, ItemComprobante
 from app.dominio.mascota import Especie, Mascota
 from app.dominio.tarifas import TarifaConsulta, TarifaControl, TarifaUrgencia
@@ -72,6 +73,31 @@ class TestAgenda(unittest.TestCase):
     def test_fuera_de_jornada(self):
         with self.assertRaises(ValidacionError):
             self.agenda.reservar(2, 1, datetime(2026, 11, 2, 19, 45), 30)
+
+    def test_ausente_vuelve_a_reservado(self):
+        turno = next(iter(self.agenda))
+        turno.marcar_ausente()
+        turno.reactivar()
+        self.assertEqual(turno.estado, EstadoTurno.RESERVADO)
+
+    def test_atendido_no_vuelve_a_reservado(self):
+        turno = next(iter(self.agenda))
+        turno.marcar_atendido()
+        with self.assertRaises(TransicionInvalidaError):
+            turno.reactivar()
+
+    def test_cancelado_no_se_reactiva_si_el_horario_fue_tomado(self):
+        original = next(iter(self.agenda))
+        original.cancelar()
+        ocupante = self.agenda.reservar(2, 1, datetime(2026, 11, 2, 10, 0), 30)
+        self.assertIs(self.agenda.conflicto_al_reservar(original), ocupante)
+
+    def test_cancelado_se_reactiva_si_el_horario_sigue_libre(self):
+        original = next(iter(self.agenda))
+        original.cancelar()
+        self.assertIsNone(self.agenda.conflicto_al_reservar(original))
+        original.reactivar()
+        self.assertEqual(original.estado, EstadoTurno.RESERVADO)
 
 
 class TestEsquemaDeVacunas(unittest.TestCase):
