@@ -21,11 +21,11 @@ PRIORIDADES = [(p.value, formato.etiqueta(p)) for p in Prioridad]
 class FormularioDerivacion:
     """Campos de una orden de derivación (se usan al registrar la atención y para órdenes posteriores)."""
 
-    def __init__(self, vista: Vista):
+    def __init__(self, vista: Vista, en_dialogo: bool = False):
         laboratorios = vista.opciones_laboratorios()
         self.laboratorio = selector("Laboratorio de destino *", laboratorios,
-                                    laboratorios[0][0] if laboratorios else None)
-        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value)
+                                    laboratorios[0][0] if laboratorios else None, col={"xs": 12, "md": 7})
+        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value, col={"xs": 12, "md": 5})
         self.indicaciones = campo("Indicaciones clínicas", multiline=True, min_lines=1, max_lines=3)
         tipos = vista.servicios.catalogos.listar("tipo_analisis")
         self._tipos = {t.id: t for t in tipos}
@@ -44,7 +44,7 @@ class FormularioDerivacion:
             filas.append(ft.Row([check, volumen], spacing=8,
                                 vertical_alignment=ft.CrossAxisAlignment.CENTER, col={"md": 12, "lg": 6}))
         self.control = ft.Column([
-            fila(self.laboratorio, self.prioridad), self.indicaciones,
+            ft.ResponsiveRow([self.laboratorio, self.prioridad], spacing=12, run_spacing=8), self.indicaciones,
             ft.Text("Análisis a solicitar (se registra una extracción por cada tipo de muestra)", size=13,
                     weight=ft.FontWeight.W_600),
             ft.ResponsiveRow(filas, run_spacing=0)], spacing=10)
@@ -377,15 +377,16 @@ class AtencionesVista(Vista):
             *([ft.Text(f"• {a.nombre_vacuna} (lote {a.lote})") for a in atencion.aplicaciones]
               or [ft.Text("Ninguna.", italic=True)]),
             ft.Text("Órdenes de derivación", weight=ft.FontWeight.BOLD),
-            *([ft.Row([ft.Text(f"• {o['numero']} » {o['laboratorio']}: {o['analisis']}", expand=True), chip(o["estado"])])
+            *([ft.Row([ft.Text(f"• {o['numero']} » {o['laboratorio']}: {o['analisis']}", expand=True), chip(o["estado"])],
+                      vertical_alignment=ft.CrossAxisAlignment.START)
                for o in self.servicios.atenciones.ordenes_de(atencion.id)] or [ft.Text("Ninguna.", italic=True)]),
         ]
         abrir_dialogo(self.page, f"Atención del {fechas.formatear_fecha(atencion.fecha_hora.date())}",
-                      ft.Column(lineas, scroll=ft.ScrollMode.AUTO, spacing=6, tight=True),
-                      [boton_cancelar(self.page, "Cerrar")], ancho=680)
+                      ft.Column(lineas, spacing=6, tight=True),
+                      [boton_cancelar(self.page, "Cerrar")], ancho=620)
 
     def _dialogo_orden(self, resumen: dict) -> None:
-        formulario = FormularioDerivacion(self)
+        formulario = FormularioDerivacion(self, en_dialogo=True)
 
         def emitir(e):
             orden = self.servicios.atenciones.emitir_orden(resumen["id_atencion"], formulario.solicitud())
@@ -395,4 +396,4 @@ class AtencionesVista(Vista):
 
         abrir_dialogo(self.page, f"Nueva orden de derivación · {resumen['mascota']}", formulario.control,
                       [boton_cancelar(self.page), ft.FilledButton("Emitir orden", icon=ft.Icons.SEND,
-                                                                  on_click=self.seguro(emitir))], ancho=760)
+                                                                  on_click=self.seguro(emitir))], ancho=640)
