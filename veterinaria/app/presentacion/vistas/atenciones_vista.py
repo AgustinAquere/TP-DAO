@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from app.dominio.atencion import Tratamiento
-from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion
+from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion, TipoMuestra
 from app.dominio.excepciones import EsquemaVacunasIncompletoError, ValidacionError
 from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha,
                                           campo_fecha_hora, campo_numero, cargar_opciones, chip, confirmar, encabezado,
@@ -27,37 +27,93 @@ class FormularioDerivacion:
                                     laboratorios[0][0] if laboratorios else None, col={"xs": 12, "md": 7})
         self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value, col={"xs": 12, "md": 5})
         self.indicaciones = campo("Indicaciones clínicas", multiline=True, min_lines=1, max_lines=3)
-        # En el modal cada análisis ocupa el ancho completo: el texto no entra en dos columnas.
-        # En el formulario, dos columnas solo con la ventana ancha; si se achica, vuelve a una.
-        columnas_analisis = 12 if en_dialogo else {"xs": 12, "xxl": 6}
-        self.analisis = [
-            ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
-                              f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · {formato.moneda(t.precio)}",
-                        data=t.id, col=columnas_analisis)
-            for t in vista.servicios.catalogos.listar("tipo_analisis")]
+        tipos = vista.servicios.catalogos.listar("tipo_analisis")
+        self._tipos = {t.id: t for t in tipos}
+        self.analisis: list[ft.Checkbox] = []
+        self._volumen_de: dict[int, ft.TextField] = {}
+        filas = []
+        for t in tipos:
+            check = ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
+                                      f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · "
+                                      f"{formato.moneda(t.precio)}",
+                                data=t.id, expand=True, on_change=vista.seguro(self._actualizar_volumenes))
+            volumen = campo_numero("Volumen (ml)", width=140, visible=False,
+                                   on_change=vista.seguro(self._sincronizar_volumen))
+            self.analisis.append(check)
+            self._volumen_de[t.id] = volumen
+            filas.append(ft.Row([check, volumen], spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER, col={"md": 12, "lg": 6}))
         self.control = ft.Column([
             ft.ResponsiveRow([self.laboratorio, self.prioridad], spacing=12, run_spacing=8), self.indicaciones,
             ft.Text("Análisis a solicitar (se registra una extracción por cada tipo de muestra)", size=13,
                     weight=ft.FontWeight.W_600),
-            ft.ResponsiveRow(self.analisis, spacing=12, run_spacing=6)], spacing=10, tight=True)
+            ft.ResponsiveRow(filas, run_spacing=0)], spacing=10)
+
+    def _actualizar_volumenes(self, e=None) -> None:
+        """Muestra el volumen al lado del análisis marcado y, si otro del mismo tipo ya tiene valor, lo copia."""
+        for check in self.analisis:
+            volumen = self._volumen_de[check.data]
+            volumen.visible = bool(check.value)
+            if not check.value:
+                continue
+            tipo = self._tipos[check.data].tipo_muestra_requerida
+            for otro in self.analisis:
+                if otro is check or not otro.value:
+                    continue
+                if self._tipos[otro.data].tipo_muestra_requerida != tipo:
+                    continue
+                cargado = self._volumen_de[otro.data]
+                if (cargado.value or "").strip() and not (volumen.value or "").strip():
+                    volumen.value = cargado.value
+                    break
+
+    def _sincronizar_volumen(self, e) -> None:
+        """Los análisis del mismo tipo de muestra comparten una sola extracción y, por lo tanto, el volumen."""
+        origen = e.control
+        tipo = next(self._tipos[check.data].tipo_muestra_requerida
+                    for check in self.analisis if self._volumen_de[check.data] is origen)
+        for check in self.analisis:
+            campo_volumen = self._volumen_de[check.data]
+            if campo_volumen is origen or not check.value:
+                continue
+            if self._tipos[check.data].tipo_muestra_requerida == tipo:
+                campo_volumen.value = origen.value
 
     def solicitud(self) -> SolicitudDerivacion:
         ids = [check.data for check in self.analisis if check.value]
         if not ids:
             raise ValidacionError("Seleccione al menos un análisis para la orden de derivación.")
+        volumenes: dict[TipoMuestra, float] = {}
+        for check in self.analisis:
+            if not check.value:
+                continue
+            tipo = self._tipos[check.data].tipo_muestra_requerida
+            volumen = leer_decimal(self._volumen_de[check.data])
+            if volumen is None:
+                continue
+            if volumen <= 0:
+                raise ValidacionError(f"El volumen de {formato.etiqueta(tipo).lower()} debe ser mayor a cero.")
+            previo = volumenes.get(tipo)
+            if previo is not None and previo != volumen:
+                raise ValidacionError(f"Los análisis de {formato.etiqueta(tipo).lower()} comparten la misma muestra: "
+                                      "indique un único volumen.")
+            volumenes[tipo] = volumen
         return SolicitudDerivacion(id_laboratorio=leer_id(self.laboratorio, True), ids_tipo_analisis=ids,
                                    prioridad=Prioridad(self.prioridad.value or "NORMAL"),
-                                   indicaciones=leer_texto(self.indicaciones))
+                                   indicaciones=leer_texto(self.indicaciones), volumenes=volumenes)
 
     def limpiar(self) -> None:
         for check in self.analisis:
             check.value = False
+            self._volumen_de[check.data].value = ""
         self.indicaciones.value, self.prioridad.value = "", Prioridad.NORMAL.value
+        self._actualizar_volumenes()
 
 
 class AtencionesVista(Vista):
     def construir(self) -> ft.Control:
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("atenciones"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Registrar atención", icon=ft.Icons.NOTE_ADD),
                             ft.Tab(label="Atenciones registradas", icon=ft.Icons.HISTORY)]),
             ft.TabBarView(controls=[self._construir_formulario(), self._construir_historial()], expand=True),
@@ -110,7 +166,7 @@ class AtencionesVista(Vista):
         self.panel_vacunas.controls = [ft.Text("Seleccione una mascota para controlar su esquema.", italic=True)]
         return ft.Container(formulario, padding=ft.Padding.only(top=12, right=8))
 
-    def al_mostrar(self, id_turno: int | None = None, **contexto) -> None:
+    def al_mostrar(self, id_turno: int | None = None, pestania: int | None = None, **contexto) -> None:
         cargar_opciones(self.mascota, self.opciones_mascotas())
         cargar_opciones(self.veterinario, self.opciones_veterinarios())
         cargar_opciones(self.otra_vacuna, [(v.id, v.nombre) for v in self.servicios.catalogos.listar("vacuna")])
@@ -121,6 +177,8 @@ class AtencionesVista(Vista):
         cargar_opciones(self.turno, [(clave, f"{fechas.formatear_fecha_hora(fechas.fecha_hora_desde_sql(t['fecha_hora_inicio']))}"
                                              f" · {t['mascota']} · {t['veterinario']}")
                                      for clave, t in self._turnos.items()])
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         if id_turno:
             self.pestanias.selected_index = 0
             self.turno.value = str(id_turno)
@@ -270,8 +328,8 @@ class AtencionesVista(Vista):
     # --- Historial ------------------------------------------------------------------------------
     def _construir_historial(self) -> ft.Control:
         recargar = self.seguro(lambda e: self._cargar_historial())
-        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=150, on_submit=recargar)
-        self.hasta = campo_fecha("Hasta", date.today(), width=150, on_submit=recargar)
+        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=170, on_submit=recargar)
+        self.hasta = campo_fecha("Hasta", date.today(), width=170, on_submit=recargar)
         self.filtro_clinica = selector("Clínica", [("", "Todas")] + self.opciones_clinicas(), "", width=280,
                                        on_select=recargar)
         self.filtro_texto = campo("Mascota, responsable o diagnóstico", prefix_icon=ft.Icons.SEARCH, expand=True,

@@ -26,20 +26,24 @@ class LaboratorioVista(Vista):
                                                                 self.seguro(lambda e: self._ver_resultado(r)))],
                                 vacio="Todavía no se emitieron resultados.")
         pestania = lambda control: ft.Container(control, padding=ft.Padding.only(top=12))
+        self.pestanias = ft.Tabs(length=3, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("laboratorio"), content=ft.Column([
+            ft.TabBar(tabs=[ft.Tab(label="Recepción de remitos", icon=ft.Icons.MOVE_TO_INBOX),
+                            ft.Tab(label="Análisis pendientes", icon=ft.Icons.PENDING_ACTIONS),
+                            ft.Tab(label="Resultados emitidos", icon=ft.Icons.FACT_CHECK)]),
+            ft.TabBarView(expand=True, controls=[
+                pestania(self.por_recibir.control), pestania(self.pendientes.control),
+                pestania(ft.Column([fila(self.busqueda), self.resultados.control], expand=True))]),
+        ], expand=True))
         return ft.Column([
             encabezado("Laboratorio central", "Recepción de remitos, verificación del precinto y resultados",
                        [self.laboratorio]),
-            ft.Tabs(length=3, selected_index=0, expand=True, content=ft.Column([
-                ft.TabBar(tabs=[ft.Tab(label="Recepción de remitos", icon=ft.Icons.MOVE_TO_INBOX),
-                                ft.Tab(label="Análisis pendientes", icon=ft.Icons.PENDING_ACTIONS),
-                                ft.Tab(label="Resultados emitidos", icon=ft.Icons.FACT_CHECK)]),
-                ft.TabBarView(expand=True, controls=[
-                    pestania(self.por_recibir.control), pestania(self.pendientes.control),
-                    pestania(ft.Column([fila(self.busqueda), self.resultados.control], expand=True))]),
-            ], expand=True)),
+            self.pestanias,
         ], expand=True, spacing=10)
 
-    def al_mostrar(self, **contexto) -> None:
+    def al_mostrar(self, pestania: int | None = None, **contexto) -> None:
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         laboratorios = self.opciones_laboratorios()
         cargar_opciones(self.laboratorio, laboratorios)
         if self.laboratorio.value is None and laboratorios:

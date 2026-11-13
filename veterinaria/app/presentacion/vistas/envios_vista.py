@@ -19,7 +19,8 @@ def _rango(m: dict) -> str:
 
 class EnviosVista(Vista):
     def construir(self) -> ft.Control:
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("envios"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Armar remito", icon=ft.Icons.INVENTORY_2),
                             ft.Tab(label="Remitos y cadena de envío", icon=ft.Icons.LOCAL_SHIPPING)]),
             ft.TabBarView(controls=[self._construir_armado(), self._construir_remitos()], expand=True),
@@ -28,7 +29,9 @@ class EnviosVista(Vista):
                                      "Conservadoras isotérmicas, remito biológico, precinto sanitario y tramos de envío"),
                           self.pestanias], expand=True, spacing=10)
 
-    def al_mostrar(self, **contexto) -> None:
+    def al_mostrar(self, pestania: int | None = None, **contexto) -> None:
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         clinicas = self.opciones_clinicas()
         cargar_opciones(self.clinica, clinicas)
         if self.clinica.value is None and clinicas:
@@ -136,11 +139,11 @@ class EnviosVista(Vista):
 
     def _dialogo_precintar(self, remito: dict) -> None:
         numero = campo("N.º de precinto (vacío = automático)")
-        responsable = campo("Responsable del empaquetado *")
+        responsable = selector("Responsable del empaquetado *", self._opciones_responsables(remito["id_clinica_origen"]))
         momento = campo_fecha_hora("Fecha y hora de colocación *", fechas.ahora())
 
         def precintar(e):
-            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_texto(responsable, True),
+            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_id(responsable, True),
                                                              leer_texto(numero), leer_fecha_hora(momento, True))
             self._despues(f"Remito precintado con el precinto {precinto.numero}. Muestras empaquetadas.")
 
@@ -150,19 +153,24 @@ class EnviosVista(Vista):
                       [boton_cancelar(self.page), ft.FilledButton("Precintar", icon=ft.Icons.LOCK,
                                                                   on_click=self.seguro(precintar))])
 
+    def _opciones_responsables(self, id_clinica: int) -> list[tuple]:
+        """Solo el personal de la clínica de origen puede precintar el remito y entregarlo al transportista."""
+        return [(v.id, f"{v.nombre_completo()} · {v.matricula}")
+                for v in self.servicios.derivaciones.veterinarios_de_clinica(id_clinica)]
+
     def _opciones_transportistas(self) -> list[tuple]:
         return [(t.id, f"{t.razon_social} · {t.patente_vehiculo or ''}") for t in self.servicios.catalogos.listar("transportista")]
 
     def _dialogo_despachar(self, remito: dict) -> None:
         transportista = selector("Transportista *", self._opciones_transportistas())
-        entregado = campo("Entregado por *")
+        entregado = selector("Entregado por *", self._opciones_responsables(remito["id_clinica_origen"]))
         temperatura = campo_numero("Temperatura de salida (°C)")
         salida = campo_fecha_hora("Fecha y hora de salida *", fechas.ahora())
         destino = campo("Destino del tramo", remito["laboratorio"])
 
         def despachar(e):
             self.servicios.derivaciones.despachar(remito["id_remito"], leer_id(transportista, True),
-                                                  leer_texto(entregado, True), leer_decimal(temperatura),
+                                                  leer_id(entregado, True), leer_decimal(temperatura),
                                                   leer_fecha_hora(salida, True), leer_texto(destino))
             self._despues("Remito despachado: el primer tramo de la cadena de custodia quedó registrado.")
 

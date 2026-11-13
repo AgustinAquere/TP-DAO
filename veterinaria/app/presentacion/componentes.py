@@ -127,8 +127,43 @@ def campo_numero(etiqueta: str, valor=None, **opciones) -> ft.TextField:
     return campo(etiqueta, numero_editable(valor), keyboard_type=ft.KeyboardType.NUMBER, **opciones)
 
 
-def campo_fecha(etiqueta: str, valor: date | None = None, **opciones) -> ft.TextField:
-    return campo(etiqueta, fechas.formatear_fecha(valor), hint_text="dd/mm/aaaa", **opciones)
+def _fecha_elegida(valor) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    return valor if isinstance(valor, date) else None
+
+
+def campo_fecha(etiqueta: str, valor: date | None = None, *, al_cambiar: Callable | None = None,
+                **opciones) -> ft.TextField:
+    """Fecha dd/mm/aaaa. Se puede tipear o elegirla en el calendario del ícono."""
+    opciones.setdefault("hint_text", "dd/mm/aaaa")
+    control = campo(etiqueta, fechas.formatear_fecha(valor), **opciones)
+
+    def abrir_calendario(e):
+        try:
+            inicial = fechas.parsear_fecha(control.value) or date.today()
+        except ValueError:
+            inicial = date.today()
+
+        def seleccionar(ev):
+            elegida = _fecha_elegida(ev.control.value)
+            if elegida is None:
+                return
+            control.value = fechas.formatear_fecha(elegida)
+            control.update()
+            if al_cambiar:
+                al_cambiar(ev)
+
+        e.page.show_dialog(ft.DatePicker(
+            value=inicial, help_text=etiqueta, cancel_text="Cancelar", confirm_text="Aceptar",
+            error_format_text="Usá el formato dd/mm/aaaa.", error_invalid_text="Esa fecha no está permitida.",
+            locale=ft.Locale("es", "AR"), on_change=seleccionar))
+
+    control.suffix = ft.Container(
+        ft.Icon(ft.Icons.CALENDAR_MONTH_OUTLINED, size=18, color=ft.Colors.ON_SURFACE_VARIANT),
+        width=28, height=28, alignment=ft.Alignment.CENTER, tooltip="Elegir en el calendario",
+        on_click=abrir_calendario)
+    return control
 
 
 def campo_fecha_hora(etiqueta: str, valor: datetime | None = None, **opciones) -> ft.TextField:
