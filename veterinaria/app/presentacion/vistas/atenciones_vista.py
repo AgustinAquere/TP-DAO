@@ -4,7 +4,7 @@ from datetime import date, timedelta
 import flet as ft
 
 from app.dominio.atencion import Tratamiento
-from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion
+from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion, TipoMuestra
 from app.dominio.excepciones import EsquemaVacunasIncompletoError, ValidacionError
 from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha,
                                           campo_fecha_hora, campo_numero, cargar_opciones, chip, confirmar, encabezado,
@@ -27,29 +27,87 @@ class FormularioDerivacion:
                                     laboratorios[0][0] if laboratorios else None)
         self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value)
         self.indicaciones = campo("Indicaciones clínicas", multiline=True, min_lines=1, max_lines=3)
-        self.analisis = [
-            ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
-                              f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · {formato.moneda(t.precio)}",
-                        data=t.id, col={"md": 12, "lg": 6})
-            for t in vista.servicios.catalogos.listar("tipo_analisis")]
+        tipos = vista.servicios.catalogos.listar("tipo_analisis")
+        self._tipos = {t.id: t for t in tipos}
+        self.analisis: list[ft.Checkbox] = []
+        self._volumen_de: dict[int, ft.TextField] = {}
+        filas = []
+        for t in tipos:
+            check = ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
+                                      f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · "
+                                      f"{formato.moneda(t.precio)}",
+                                data=t.id, expand=True, on_change=vista.seguro(self._actualizar_volumenes))
+            volumen = campo_numero("Volumen (ml)", width=140, visible=False,
+                                   on_change=vista.seguro(self._sincronizar_volumen))
+            self.analisis.append(check)
+            self._volumen_de[t.id] = volumen
+            filas.append(ft.Row([check, volumen], spacing=8,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER, col={"md": 12, "lg": 6}))
         self.control = ft.Column([
             fila(self.laboratorio, self.prioridad), self.indicaciones,
             ft.Text("Análisis a solicitar (se registra una extracción por cada tipo de muestra)", size=13,
                     weight=ft.FontWeight.W_600),
-            ft.ResponsiveRow(self.analisis, run_spacing=0)], spacing=10)
+            ft.ResponsiveRow(filas, run_spacing=0)], spacing=10)
+
+    def _actualizar_volumenes(self, e=None) -> None:
+        """Muestra el volumen al lado del análisis marcado y, si otro del mismo tipo ya tiene valor, lo copia."""
+        for check in self.analisis:
+            volumen = self._volumen_de[check.data]
+            volumen.visible = bool(check.value)
+            if not check.value:
+                continue
+            tipo = self._tipos[check.data].tipo_muestra_requerida
+            for otro in self.analisis:
+                if otro is check or not otro.value:
+                    continue
+                if self._tipos[otro.data].tipo_muestra_requerida != tipo:
+                    continue
+                cargado = self._volumen_de[otro.data]
+                if (cargado.value or "").strip() and not (volumen.value or "").strip():
+                    volumen.value = cargado.value
+                    break
+
+    def _sincronizar_volumen(self, e) -> None:
+        """Los análisis del mismo tipo de muestra comparten una sola extracción y, por lo tanto, el volumen."""
+        origen = e.control
+        tipo = next(self._tipos[check.data].tipo_muestra_requerida
+                    for check in self.analisis if self._volumen_de[check.data] is origen)
+        for check in self.analisis:
+            campo_volumen = self._volumen_de[check.data]
+            if campo_volumen is origen or not check.value:
+                continue
+            if self._tipos[check.data].tipo_muestra_requerida == tipo:
+                campo_volumen.value = origen.value
 
     def solicitud(self) -> SolicitudDerivacion:
         ids = [check.data for check in self.analisis if check.value]
         if not ids:
             raise ValidacionError("Seleccione al menos un análisis para la orden de derivación.")
+        volumenes: dict[TipoMuestra, float] = {}
+        for check in self.analisis:
+            if not check.value:
+                continue
+            tipo = self._tipos[check.data].tipo_muestra_requerida
+            volumen = leer_decimal(self._volumen_de[check.data])
+            if volumen is None:
+                continue
+            if volumen <= 0:
+                raise ValidacionError(f"El volumen de {formato.etiqueta(tipo).lower()} debe ser mayor a cero.")
+            previo = volumenes.get(tipo)
+            if previo is not None and previo != volumen:
+                raise ValidacionError(f"Los análisis de {formato.etiqueta(tipo).lower()} comparten la misma muestra: "
+                                      "indique un único volumen.")
+            volumenes[tipo] = volumen
         return SolicitudDerivacion(id_laboratorio=leer_id(self.laboratorio, True), ids_tipo_analisis=ids,
                                    prioridad=Prioridad(self.prioridad.value or "NORMAL"),
-                                   indicaciones=leer_texto(self.indicaciones))
+                                   indicaciones=leer_texto(self.indicaciones), volumenes=volumenes)
 
     def limpiar(self) -> None:
         for check in self.analisis:
             check.value = False
+            self._volumen_de[check.data].value = ""
         self.indicaciones.value, self.prioridad.value = "", Prioridad.NORMAL.value
+        self._actualizar_volumenes()
 
 
 class AtencionesVista(Vista):
