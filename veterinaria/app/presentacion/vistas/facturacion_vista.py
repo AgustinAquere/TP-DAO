@@ -50,8 +50,8 @@ class FacturacionVista(Vista):
                         vertical_alignment=ft.CrossAxisAlignment.START, expand=True, spacing=16)
 
         recargar = self.seguro(lambda e: self._cargar_emitidos())
-        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=150, on_submit=recargar)
-        self.hasta = campo_fecha("Hasta", date.today(), width=150, on_submit=recargar)
+        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=170, on_submit=recargar)
+        self.hasta = campo_fecha("Hasta", date.today(), width=170, on_submit=recargar)
         self.filtro_clinica = selector("Clínica", [], "", width=280, on_select=recargar)
         self.emitidos = Tabla(["Número", "Emisión", "Cliente", "Mascota", "Clínica", "Tarifa", ("Subtotal", True),
                                ("Total", True)], acciones=self._acciones_emitido, vacio="No hay comprobantes en el período.")
