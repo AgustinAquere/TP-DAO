@@ -32,6 +32,16 @@ class Vista(ABC):
         """Manejador de eventos que muestra los errores de negocio en lugar de propagarlos."""
         return manejar_errores(self.notificar, funcion)
 
+    def sincronizar_pestania(self, clave: str) -> Callable:
+        """Avisa al menú qué pestaña quedó activa, sin volver a cargar la vista."""
+        def handler(e):
+            indice = e.control.selected_index
+            dato = getattr(e, "data", None)
+            if dato is not None and str(dato).lstrip("-").isdigit():
+                indice = int(dato)
+            self.app.sincronizar(clave, pestania=indice)
+        return handler
+
     # Opciones frecuentes para los selectores (pares clave, texto)
     def opciones_clinicas(self) -> list[tuple]:
         return [(c.id, c.nombre) for c in self.servicios.catalogos.listar("clinica")]

@@ -2,7 +2,7 @@
 import unittest
 from datetime import date, datetime, timedelta
 
-from app.dominio.enums import TipoAtencion
+from app.dominio.enums import EstadoTurno, TipoAtencion
 from app.dominio.excepciones import (ErrorPersistencia, EsquemaVacunasIncompletoError, TransicionInvalidaError,
                                      TurnoSuperpuestoError, ValidacionError)
 from app.persistencia.conexion import ConexionBD
@@ -61,6 +61,50 @@ class TestValidacionesDeNegocio(BaseDeDatosDePrueba):
                              " VALUES (?, ?, ?, ?, 30)", (id_vet, id_mascota, id_clinica,
                                                           fechas.a_sql(inicio + timedelta(minutes=10))))
 
+    def test_listar_turnos_por_rango_de_fechas(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        lunes = date.today() + timedelta(days=80)
+        lunes -= timedelta(days=lunes.weekday())
+        manana = datetime.combine(lunes, datetime.min.time()).replace(hour=9)
+        miercoles = manana + timedelta(days=2)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, manana, 30)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, miercoles, 60)
+        semana = self.s.turnos.listar(id_veterinario=id_vet, desde=lunes, hasta=lunes + timedelta(days=6))
+        inicios = {t["fecha_hora_inicio"] for t in semana}
+        self.assertIn(fechas.a_sql(manana), inicios)
+        self.assertIn(fechas.a_sql(miercoles), inicios)
+        del_lunes = {t["fecha_hora_inicio"] for t in self.s.turnos.listar(fecha=lunes, id_veterinario=id_vet)}
+        self.assertIn(fechas.a_sql(manana), del_lunes)
+        self.assertNotIn(fechas.a_sql(miercoles), del_lunes)
+
+    def test_ausente_y_cancelado_vuelven_a_reservado(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        dia = date.today() + timedelta(days=50)
+        ausente = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, datetime.combine(dia, datetime.min.time()).replace(hour=9), 30)
+        cancelado = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, datetime.combine(dia, datetime.min.time()).replace(hour=11), 30)
+        self.s.turnos.marcar_ausente(ausente.id)
+        self.s.turnos.cancelar(cancelado.id)
+        self.s.turnos.reactivar(ausente.id)
+        self.s.turnos.reactivar(cancelado.id)
+        estados = {t["id_turno"]: t["estado"] for t in self.s.turnos.listar(fecha=dia, id_veterinario=id_vet)}
+        self.assertEqual(estados[ausente.id], EstadoTurno.RESERVADO)
+        self.assertEqual(estados[cancelado.id], EstadoTurno.RESERVADO)
+
+    def test_cancelado_no_vuelve_si_el_horario_fue_tomado(self):
+        id_vet = self.id_de("SELECT MIN(id_veterinario) FROM veterinario")
+        id_clinica = self.id_de("SELECT MIN(id_clinica) FROM veterinario_clinica WHERE id_veterinario = ?", (id_vet,))
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        inicio = datetime.combine(date.today() + timedelta(days=60), datetime.min.time()).replace(hour=15)
+        primero = self.s.turnos.reservar(id_vet, id_mascota, id_clinica, inicio, 30)
+        self.s.turnos.cancelar(primero.id)
+        self.s.turnos.reservar(id_vet, id_mascota, id_clinica, inicio, 30)
+        with self.assertRaises(TurnoSuperpuestoError):
+            self.s.turnos.reactivar(primero.id)
+
     def test_control_de_esquema_de_vacunas(self):
         id_cliente = self.id_de("SELECT MIN(id_cliente) FROM cliente")
         cachorro = self.s.mascotas.alta(id_cliente, id_especie=self.id_de("SELECT id_especie FROM especie WHERE nombre='Canino'"),
@@ -95,10 +139,35 @@ class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
         conservadora = next(c for c in self.s.derivaciones.conservadoras_disponibles() if c.temp_min_c >= 2 and c.temp_max_c <= 8)
         remito = self.s.derivaciones.armar_remito([m.id for m in orden.muestras], conservadora.id, id_clinica,
                                                   fechas.ahora() - timedelta(hours=2, minutes=30))
-        self.s.derivaciones.precintar(remito.id, "Vet", fecha_hora=fechas.ahora() - timedelta(hours=2))
-        self.s.derivaciones.despachar(remito.id, self.id_de("SELECT MIN(id_transportista) FROM transportista"), "Vet",
-                                      fecha_hora=fechas.ahora() - timedelta(hours=1, minutes=30))
+        self.s.derivaciones.precintar(remito.id, veterinario.id, fecha_hora=fechas.ahora() - timedelta(hours=2))
+        self.s.derivaciones.despachar(remito.id, self.id_de("SELECT MIN(id_transportista) FROM transportista"),
+                                      veterinario.id, fecha_hora=fechas.ahora() - timedelta(hours=1, minutes=30))
         return remito
+
+    def test_precinta_y_despacha_solo_personal_de_la_clinica_de_origen(self):
+        _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])
+        conservadora = next(c for c in self.s.derivaciones.conservadoras_disponibles() if c.temp_min_c >= 2 and c.temp_max_c <= 8)
+        remito = self.s.derivaciones.armar_remito([m.id for m in orden.muestras], conservadora.id, id_clinica)
+        habilitados = self.s.derivaciones.veterinarios_de_clinica(id_clinica)
+        self.assertIn(veterinario.id, [v.id for v in habilitados])
+        ajeno = next(v for v in self.s.catalogos.listar("veterinario") if not v.trabaja_en(id_clinica))
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.precintar(remito.id, ajeno.id)
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.precintar(remito.id, None)
+        self.s.derivaciones.precintar(remito.id, veterinario.id)
+        muestra = self.s.derivaciones.trazabilidad(orden.muestras[0].id)
+        self.assertEqual(muestra.historial().ultimo().responsable, veterinario.nombre_completo())
+
+        id_transportista = self.id_de("SELECT MIN(id_transportista) FROM transportista")
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.despachar(remito.id, id_transportista, ajeno.id)
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.despachar(remito.id, id_transportista, None)
+        tramo = self.s.derivaciones.despachar(remito.id, id_transportista, veterinario.id)
+        self.assertEqual(tramo.entregado_por, veterinario.nombre_completo())
+        muestra = self.s.derivaciones.trazabilidad(orden.muestras[0].id)
+        self.assertEqual(muestra.historial().ultimo().responsable, veterinario.nombre_completo())
 
     def test_precinto_roto_impide_procesar(self):
         _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])

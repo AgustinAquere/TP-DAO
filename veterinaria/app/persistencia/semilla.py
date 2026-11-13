@@ -320,9 +320,9 @@ class _Sembrador:
                 continue
             remito = self.s.derivaciones.armar_remito(ids, conservadora.id, id_clinica, momento)
             self.nro_remito += 1
-            self._avanzar_remito(remito.id, veterinario.nombre_completo(), momento, self.nro_remito, conservadora)
+            self._avanzar_remito(remito.id, veterinario, momento, self.nro_remito, conservadora)
 
-    def _avanzar_remito(self, id_remito: int, responsable: str, inicio: datetime, numero: int,
+    def _avanzar_remito(self, id_remito: int, veterinario, inicio: datetime, numero: int,
                         conservadora: Conservadora) -> None:
         """Avanza el remito por su ciclo de vida mientras las fechas no superen el momento actual.
 
@@ -335,13 +335,13 @@ class _Sembrador:
         precintado = inicio + timedelta(minutes=30)
         if precintado > self.ahora:
             return
-        self.s.derivaciones.precintar(id_remito, responsable, fecha_hora=precintado)
+        self.s.derivaciones.precintar(id_remito, veterinario.id, fecha_hora=precintado)
         salida = precintado + timedelta(minutes=self.rnd.randint(30, 90))
         if salida > self.ahora:
             return
         transportista = self.rnd.choice(self.transportistas)
-        self.s.derivaciones.despachar(id_remito, transportista.id, responsable, temperatura_salida=temperatura(),
-                                      fecha_hora=salida)
+        self.s.derivaciones.despachar(id_remito, transportista.id, veterinario.id,
+                                      temperatura_salida=temperatura(), fecha_hora=salida)
         llegada = salida + timedelta(hours=self.rnd.uniform(2.5, 7) if falla != "demora" else 27)
         if self.rnd.random() < 0.35 or falla == "demora":  # cambio de transportista en un centro de distribución
             posta = salida + (llegada - salida) / 2
@@ -416,11 +416,10 @@ class _Sembrador:
             remito = self.s.derivaciones.armar_remito(ids, conservadora.id, id_clinica, momento + timedelta(minutes=30))
             if etapa == "preparacion":
                 continue
-            self.s.derivaciones.precintar(remito.id, veterinario.nombre_completo(),
-                                          fecha_hora=momento + timedelta(hours=1))
+            self.s.derivaciones.precintar(remito.id, veterinario.id, fecha_hora=momento + timedelta(hours=1))
             if etapa == "precintado":
                 continue
-            self.s.derivaciones.despachar(remito.id, self.transportistas[0].id, veterinario.nombre_completo(),
+            self.s.derivaciones.despachar(remito.id, self.transportistas[0].id, veterinario.id,
                                           temperatura_salida=4.5, fecha_hora=momento + timedelta(hours=1, minutes=30))
             if etapa == "transito":
                 continue
