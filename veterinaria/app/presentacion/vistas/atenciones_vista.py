@@ -18,14 +18,23 @@ TIPOS_ATENCION = [(t.value, formato.etiqueta(t)) for t in TipoAtencion]
 PRIORIDADES = [(p.value, formato.etiqueta(p)) for p in Prioridad]
 
 
+def a_lo_ancho(control: ft.Control, col: dict) -> ft.Row:
+    """Celda de ResponsiveRow que el control (con expand=True) ocupa entera: la celda solo pone un ancho
+    máximo, y un Dropdown suelto se achica a su contenido en lugar de llenarla."""
+    return ft.Row([control], col=col)
+
+
 class FormularioDerivacion:
     """Campos de una orden de derivación (se usan al registrar la atención y para órdenes posteriores)."""
 
     def __init__(self, vista: Vista, en_dialogo: bool = False):
+        # Los breakpoints de ResponsiveRow miran el ancho de la ventana, no el del diálogo: en el diálogo
+        # (angosto) cada análisis va en su propia fila aunque la ventana sea ancha.
+        col_analisis = {"xs": 12} if en_dialogo else {"md": 12, "lg": 6}
         laboratorios = vista.opciones_laboratorios()
         self.laboratorio = selector("Laboratorio de destino *", laboratorios,
-                                    laboratorios[0][0] if laboratorios else None, col={"xs": 12, "md": 7})
-        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value, col={"xs": 12, "md": 5})
+                                    laboratorios[0][0] if laboratorios else None, expand=True)
+        self.prioridad = selector("Prioridad", PRIORIDADES, Prioridad.NORMAL.value, expand=True)
         self.indicaciones = campo("Indicaciones clínicas", multiline=True, min_lines=1, max_lines=3)
         tipos = vista.servicios.catalogos.listar("tipo_analisis")
         self._tipos = {t.id: t for t in tipos}
@@ -33,21 +42,32 @@ class FormularioDerivacion:
         self._volumen_de: dict[int, ft.TextField] = {}
         filas = []
         for t in tipos:
-            check = ft.Checkbox(label=f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
-                                      f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · "
-                                      f"{formato.moneda(t.precio)}",
-                                data=t.id, expand=True, on_change=vista.seguro(self._actualizar_volumenes))
+            check = ft.Checkbox(data=t.id, on_change=vista.seguro(self._actualizar_volumenes))
+            # La etiqueta va aparte porque la del Checkbox no hace salto de línea y se encima con la columna vecina.
+            etiqueta = ft.GestureDetector(
+                ft.Text(f"{t.nombre}: {formato.etiqueta(t.tipo_muestra_requerida).lower()}, "
+                        f"{t.temp_min_c:g} a {t.temp_max_c:g} °C, {t.horas_max_viabilidad} h · "
+                        f"{formato.moneda(t.precio)}"),
+                mouse_cursor=ft.MouseCursor.CLICK, expand=True,
+                on_tap=vista.seguro(lambda e, check=check: self._alternar(check)))
             volumen = campo_numero("Volumen (ml)", width=140, visible=False,
                                    on_change=vista.seguro(self._sincronizar_volumen))
             self.analisis.append(check)
             self._volumen_de[t.id] = volumen
-            filas.append(ft.Row([check, volumen], spacing=8,
-                                vertical_alignment=ft.CrossAxisAlignment.CENTER, col={"md": 12, "lg": 6}))
+            filas.append(ft.Row([check, etiqueta, volumen], spacing=4,
+                                vertical_alignment=ft.CrossAxisAlignment.CENTER, col=col_analisis))
         self.control = ft.Column([
-            ft.ResponsiveRow([self.laboratorio, self.prioridad], spacing=12, run_spacing=8), self.indicaciones,
+            ft.ResponsiveRow([a_lo_ancho(self.laboratorio, {"xs": 12, "md": 8 if en_dialogo else 7}),
+                              a_lo_ancho(self.prioridad, {"xs": 12, "md": 4 if en_dialogo else 5})],
+                             spacing=12, run_spacing=8), self.indicaciones,
             ft.Text("Análisis a solicitar (se registra una extracción por cada tipo de muestra)", size=13,
                     weight=ft.FontWeight.W_600),
             ft.ResponsiveRow(filas, run_spacing=0)], spacing=10)
+
+    def _alternar(self, check: ft.Checkbox) -> None:
+        """Clic en la etiqueta: marca o desmarca el análisis, como si se hubiera tocado la casilla."""
+        check.value = not check.value
+        self._actualizar_volumenes()
 
     def _actualizar_volumenes(self, e=None) -> None:
         """Muestra el volumen al lado del análisis marcado y, si otro del mismo tipo ya tiene valor, lo copia."""
@@ -328,19 +348,24 @@ class AtencionesVista(Vista):
     # --- Historial ------------------------------------------------------------------------------
     def _construir_historial(self) -> ft.Control:
         recargar = self.seguro(lambda e: self._cargar_historial())
-        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=170, al_cambiar=recargar,
+        # En una sola fila con anchos fijos, el buscador quedaba aplastado en ventanas angostas: los filtros
+        # se acomodan en dos filas hasta que la ventana es bien ancha (xxl).
+        fecha = {"xs": 6, "md": 3, "xxl": 2}
+        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), col=fecha, al_cambiar=recargar,
                                  on_submit=recargar)
-        self.hasta = campo_fecha("Hasta", date.today(), width=170, al_cambiar=recargar, on_submit=recargar)
-        self.filtro_clinica = selector("Clínica", [("", "Todas")] + self.opciones_clinicas(), "", width=280,
+        self.hasta = campo_fecha("Hasta", date.today(), col=fecha, al_cambiar=recargar, on_submit=recargar)
+        self.filtro_clinica = selector("Clínica", [("", "Todas")] + self.opciones_clinicas(), "", expand=True,
                                        on_select=recargar)
         self.filtro_texto = campo("Mascota, responsable o diagnóstico", prefix_icon=ft.Icons.SEARCH, expand=True,
                                   on_change=recargar)
         self.historial = Tabla(["Fecha", "Mascota", "Responsable", "Tipo", "Veterinario", "Clínica", "Diagnóstico",
                                 "Órdenes", "Comprobante"], acciones=self._acciones_historial,
                                vacio="No hay atenciones en el período.")
+        buscador = ft.Row([self.filtro_texto, ft.IconButton(ft.Icons.SEARCH, tooltip="Buscar", on_click=recargar)],
+                          spacing=4, col={"xs": 12, "xxl": 5})
         return ft.Container(ft.Column([
-            ft.Row([self.desde, self.hasta, self.filtro_clinica, self.filtro_texto,
-                    ft.IconButton(ft.Icons.SEARCH, tooltip="Buscar", on_click=recargar)]),
+            ft.ResponsiveRow([self.desde, self.hasta, a_lo_ancho(self.filtro_clinica, {"xs": 12, "md": 6, "xxl": 3}),
+                              buscador], spacing=12, run_spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
             self.historial.control], expand=True, spacing=12), padding=ft.Padding.only(top=12))
 
     def _cargar_historial(self) -> None:
