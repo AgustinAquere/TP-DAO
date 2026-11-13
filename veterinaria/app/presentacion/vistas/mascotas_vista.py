@@ -3,8 +3,8 @@ import flet as ft
 
 from app.dominio.enums import Sexo
 from app.presentacion.componentes import (COLOR_PRIMARIO, Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo,
-                                          campo_fecha, campo_numero, chip, confirmar, encabezado, fila, leer_decimal,
-                                          leer_fecha, leer_id, leer_texto, selector)
+                                          campo_fecha, campo_numero, cargar_opciones, chip, confirmar, encabezado,
+                                          fila, leer_decimal, leer_fecha, leer_id, leer_texto, selector)
 from app.presentacion.vistas.base_vista import Vista
 from app.utils import fechas, formato
 
@@ -14,9 +14,9 @@ SEXOS = [(Sexo.MACHO.value, "Macho"), (Sexo.HEMBRA.value, "Hembra")]
 class MascotasVista(Vista):
     def construir(self) -> ft.Control:
         self.busqueda = campo("Buscar por nombre, responsable, DNI o microchip", prefix_icon=ft.Icons.SEARCH,
-                              expand=True, on_change=self.seguro(lambda e: self.al_mostrar()))
+                              expand=True, on_change=self.seguro(lambda e: self._refrescar()))
         self.filtro_cliente = selector("Responsable", [], width=360, filtrable=True,
-                                       on_select=self.seguro(lambda e: self.al_mostrar()))
+                                       on_select=self.seguro(lambda e: self._refrescar()))
         self.tabla = Tabla(["Nombre", "Especie", "Raza", "Sexo", "Edad", ("Peso (kg)", True), "Responsable",
                             "Historia clínica"], acciones=self._acciones, vacio="No se encontraron mascotas.")
         return ft.Column([
@@ -29,17 +29,23 @@ class MascotasVista(Vista):
             self.tabla.control,
         ], expand=True, spacing=14)
 
-    def _opciones_clientes(self) -> list[tuple]:
+    def _opciones_clientes(self, incluir_inactivos: bool = False) -> list[tuple]:
+        if incluir_inactivos:
+            return [(c["id_cliente"], f"{c['apellido']}, {c['nombre']} · DNI {c['dni']}")
+                    for c in self.servicios.clientes.buscar(incluir_inactivos=True)]
         return [(c.id, f"{c.nombre_completo()} · DNI {c.dni}") for c in self.servicios.clientes.listar_activos()]
 
     def _limpiar_filtros(self) -> None:
         self.busqueda.value, self.filtro_cliente.value = "", None
-        self.al_mostrar()
+        self._refrescar()
 
     def al_mostrar(self, id_cliente: int | None = None, **contexto) -> None:
-        self.filtro_cliente.options = [ft.DropdownOption(key=str(k), text=t) for k, t in self._opciones_clientes()]
-        if id_cliente:
+        cargar_opciones(self.filtro_cliente, self._opciones_clientes(incluir_inactivos=True))
+        if id_cliente is not None:
             self.busqueda.value, self.filtro_cliente.value = "", str(id_cliente)
+        self._refrescar()
+
+    def _refrescar(self) -> None:
         mascotas = self.servicios.mascotas.listar(self.busqueda.value or "", leer_id(self.filtro_cliente))
         nacimiento = lambda m: fechas.fecha_desde_sql(m["fecha_nacimiento"])
         self.tabla.cargar([[m["nombre"], m["especie"], m["raza"], "Macho" if m["sexo"] == "M" else "Hembra",

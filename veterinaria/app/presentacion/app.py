@@ -149,6 +149,7 @@ class VeterinariaApp:
         self._suspender = True
         try:
             self.contenido.content = vista.control
+            self.page.update()
             vista.seguro(vista.al_mostrar)(**contexto)
             self._marcar(clave, **contexto)
         finally:
@@ -177,7 +178,6 @@ class VeterinariaApp:
     def _alternar_grupo(self, id_grupo: str) -> None:
         self._abierta = None if self._abierta == id_grupo else id_grupo
         self._pintar_menu()
-        self.page.update()
 
     def _ir(self, entrada: Entrada):
         return lambda e: self.navegar(entrada.clave, **entrada.contexto)
