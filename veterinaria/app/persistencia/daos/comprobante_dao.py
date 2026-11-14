@@ -55,7 +55,7 @@ class ComprobanteDAO(BaseDAO[ComprobanteAtencion]):
         return f"{id_clinica:04d}-{cantidad + 1:08d}"
 
     def listar_resumen(self, desde: date | None = None, hasta: date | None = None,
-                       id_clinica: int | None = None) -> list[dict]:
+                       id_clinica: int | None = None, texto: str = "") -> list[dict]:
         condiciones, parametros = ["1 = 1"], []
         for valor, condicion in ((fechas.a_sql(desde), "date(cp.fecha_emision) >= ?"),
                                  (fechas.a_sql(hasta), "date(cp.fecha_emision) <= ?"),
@@ -63,14 +63,21 @@ class ComprobanteDAO(BaseDAO[ComprobanteAtencion]):
             if valor:
                 condiciones.append(condicion)
                 parametros.append(valor)
+        texto = texto.strip()
+        if texto:
+            condiciones.append("""(cp.numero LIKE ? OR m.nombre LIKE ? OR c.apellido LIKE ?
+                                    OR c.nombre LIKE ? OR c.dni LIKE ?
+                                    OR (c.apellido || ', ' || c.nombre) LIKE ?)""")
+            parametros.extend([f"%{texto}%"] * 6)
         return self._diccionarios(f"""
             SELECT cp.*, c.apellido || ', ' || c.nombre AS cliente, c.dni, cl.nombre AS clinica,
-                   m.nombre AS mascota, a.tipo AS tipo_atencion, a.fecha_hora AS fecha_atencion
+                   m.nombre AS mascota, e.nombre AS especie, a.tipo AS tipo_atencion, a.fecha_hora AS fecha_atencion
               FROM comprobante_atencion cp
               JOIN cliente c ON c.id_cliente = cp.id_cliente
               JOIN clinica cl ON cl.id_clinica = cp.id_clinica
               JOIN atencion a ON a.id_atencion = cp.id_atencion
               JOIN historia_clinica h ON h.id_historia = a.id_historia
               JOIN mascota m ON m.id_mascota = h.id_mascota
+              JOIN especie e ON e.id_especie = m.id_especie
              WHERE {' AND '.join(condiciones)}
              ORDER BY cp.fecha_emision DESC""", tuple(parametros))
