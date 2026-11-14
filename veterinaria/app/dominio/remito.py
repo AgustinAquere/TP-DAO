@@ -83,3 +83,39 @@ class RemitoBiologico:
 
     def __repr__(self) -> str:
         return f"RemitoBiologico({self.numero}, {self.nombre_estado()}, {len(self.muestras)} muestras)"
+
+
+# Situación del último tramo mientras el remito sigue en tránsito.
+EN_CURSO = "EN_CURSO"              # salió y todavía no se registró la llegada
+EN_POSTA = "EN_POSTA"              # llegó a una posta; puede salir el tramo siguiente
+EN_LABORATORIO = "EN_LABORATORIO"  # llegó al laboratorio; falta verificar el precinto
+
+
+def es_arribo_a_laboratorio(destino: str | None, recibido_por: str | None, nombre_laboratorio: str,
+                            nombres_bioquimicos: set[str]) -> bool:
+    """La llegada es al laboratorio cuando la recibe un bioquímico de ese laboratorio, en su sede."""
+    return bool(recibido_por) and recibido_por in nombres_bioquimicos and destino == nombre_laboratorio
+
+
+def situacion_tramo(estado: str, llegada, recibido_por: str | None, destino: str | None,
+                    nombre_laboratorio: str, nombres_bioquimicos: set[str]) -> str | None:
+    """EN_CURSO, EN_POSTA o EN_LABORATORIO si el remito está en tránsito; None en otro estado."""
+    if estado != "EN_TRANSITO":
+        return None
+    if llegada is None:
+        return EN_CURSO
+    if es_arribo_a_laboratorio(destino, recibido_por, nombre_laboratorio, nombres_bioquimicos):
+        return EN_LABORATORIO
+    return EN_POSTA
+
+
+def anotar_situacion_tramos(filas: list[dict], bioquimicos) -> None:
+    """Agrega `situacion_tramo` a cada fila de `listar_resumen`."""
+    por_laboratorio: dict[int, set[str]] = {}
+    for bioquimico in bioquimicos:
+        por_laboratorio.setdefault(bioquimico.id_laboratorio, set()).add(bioquimico.nombre_completo())
+    for fila in filas:
+        nombres = por_laboratorio.get(fila["id_laboratorio_destino"], set())
+        fila["situacion_tramo"] = situacion_tramo(
+            fila["estado"], fila.get("ultima_llegada"), fila.get("ultimo_recibido_por"),
+            fila.get("ultimo_destino"), fila["laboratorio"], nombres)

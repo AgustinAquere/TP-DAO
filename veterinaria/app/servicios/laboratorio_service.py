@@ -5,7 +5,7 @@ from app import config
 from app.dominio.enums import EstadoPrecinto
 from app.dominio.excepciones import EntidadNoEncontradaError, TransicionInvalidaError, ValidacionError
 from app.dominio.laboratorio import DetalleResultado, RecepcionLaboratorio, ResultadoAnalisis
-from app.dominio.remito import RemitoBiologico
+from app.dominio.remito import RemitoBiologico, anotar_situacion_tramos, es_arribo_a_laboratorio
 from app.persistencia.conexion import ConexionBD
 from app.persistencia.daos.catalogos_dao import ConservadoraDAO
 from app.persistencia.daos.derivacion_dao import MuestraDAO, OrdenDerivacionDAO
@@ -36,21 +36,47 @@ class LaboratorioService:
             raise ValidacionError(f"{bioquimico.nombre_completo()} no pertenece al laboratorio de destino.")
         return bioquimico
 
+    def _coincidir_con_llegada(self, remito: RemitoBiologico, nombre_bioquimico: str, fecha_hora: datetime,
+                               temperatura_arribo: float | None) -> tuple[datetime, float | None]:
+        """Si el tramo ya llegó al laboratorio, la recepción reutiliza esos datos. Si está en una posta, no se recibe."""
+        actual = remito.tramo_actual()
+        if actual is None or actual.esta_abierto():
+            return fecha_hora, temperatura_arribo
+        nombres = {b.nombre_completo() for b in self._bioquimicos.listar_por_laboratorio(remito.id_laboratorio_destino)}
+        if not es_arribo_a_laboratorio(actual.destino, actual.recibido_por, remito.nombre_laboratorio, nombres):
+            raise ValidacionError("El remito está en una posta intermedia. Registre el tramo hasta el "
+                                  "laboratorio antes de recibirlo.")
+        if nombre_bioquimico != actual.recibido_por:
+            raise ValidacionError("El bioquímico que recibe debe ser quien registró la llegada al laboratorio.")
+        if fecha_hora.replace(second=0, microsecond=0) != actual.fecha_hora_llegada.replace(second=0, microsecond=0):
+            raise ValidacionError("La fecha y hora deben coincidir con la llegada ya registrada.")
+        if actual.temperatura_llegada_c is not None and temperatura_arribo != actual.temperatura_llegada_c:
+            raise ValidacionError("La temperatura debe coincidir con la registrada al llegar.")
+        return actual.fecha_hora_llegada, actual.temperatura_llegada_c if actual.temperatura_llegada_c is not None else temperatura_arribo
+
     # --- Proceso 6: recepción ---------------------------------------------------------------
     def remitos_por_recibir(self, id_laboratorio: int | None = None) -> list[dict]:
-        return self._remitos.listar_resumen("EN_TRANSITO", id_laboratorio)
+        filas = self._remitos.listar_resumen("EN_TRANSITO", id_laboratorio)
+        anotar_situacion_tramos(filas, self._bioquimicos.listar())
+        return filas
 
     def registrar_recepcion(self, id_remito: int, id_bioquimico: int, precinto_intacto: bool,
                             temperatura_arribo: float | None = None, observacion: str | None = None,
                             fecha_hora: datetime | None = None) -> RemitoBiologico:
         """Verifica el precinto: si llegó roto, el remito y todas sus muestras quedan rechazados
-        y no podrán procesarse. Con precinto intacto, cada muestra se evalúa por temperatura y viabilidad."""
+        y no podrán procesarse. Con precinto intacto, cada muestra se evalúa por temperatura y viabilidad.
+
+        Si el último tramo ya se cerró en el laboratorio, la fecha, el bioquímico y la temperatura
+        (cuando se cargó) tienen que coincidir con esa llegada.
+        """
         remito = self._remitos.obtener_por_id(id_remito)
         if remito is None:
             raise EntidadNoEncontradaError("el remito", id_remito)
         bioquimico = self._bioquimico_del_laboratorio(id_bioquimico, remito.id_laboratorio_destino)
+        fecha_hora, temperatura_arribo = self._coincidir_con_llegada(remito, bioquimico.nombre_completo(),
+                                                                     fecha_hora or fechas.ahora(), temperatura_arribo)
         recepcion = RecepcionLaboratorio(
-            id_remito=id_remito, id_bioquimico=id_bioquimico, fecha_hora=fecha_hora or fechas.ahora(),
+            id_remito=id_remito, id_bioquimico=id_bioquimico, fecha_hora=fecha_hora,
             estado_precinto_verificado=EstadoPrecinto.INTACTO if precinto_intacto else EstadoPrecinto.ROTO,
             temperatura_arribo_c=temperatura_arribo,
             motivo_rechazo=None if precinto_intacto else (observacion or None))

@@ -347,11 +347,12 @@ class _Sembrador:
             posta = salida + (llegada - salida) / 2
             if posta > self.ahora:
                 return
-            self.s.derivaciones.cerrar_tramo(id_remito, posta, "Centro de distribución Ruta 9", temperatura())
             otro = self.rnd.choice([t for t in self.transportistas if t.id != transportista.id])
+            self.s.derivaciones.cerrar_tramo(id_remito, posta, destino_final=False, id_receptor=otro.id,
+                                             lugar="Centro de distribución Ruta 9", temperatura_llegada=temperatura())
             self.s.derivaciones.registrar_tramo(id_remito, otro.id, "Centro de distribución Ruta 9",
                                                 self.laboratorio.nombre, posta + timedelta(minutes=20),
-                                                "Operador de logística", temperatura())
+                                                otro.razon_social, temperatura())
         if llegada > self.ahora:
             return
         bioquimico = self.rnd.choice(self.bioquimicos)
