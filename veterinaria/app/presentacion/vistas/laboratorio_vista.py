@@ -2,6 +2,7 @@
 import flet as ft
 
 from app.dominio.laboratorio import DetalleResultado
+from app.dominio.remito import EN_LABORATORIO, EN_POSTA
 from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha_hora,
                                           campo_numero, cargar_opciones, chip, encabezado, fila, leer_decimal,
                                           leer_fecha_hora, leer_id, leer_texto, numero_editable, selector)
@@ -55,7 +56,7 @@ class LaboratorioVista(Vista):
         remitos = self.servicios.laboratorio.remitos_por_recibir(id_laboratorio)
         self.por_recibir.cargar([[r["numero"], r["clinica"], r["conservadora"], r["cantidad_muestras"],
                                   fechas.formatear_fecha_hora(fechas.fecha_hora_desde_sql(r["salida"])),
-                                  r["transportista"], r["precinto"]] for r in remitos], remitos)
+                                  self._transportista(r), r["precinto"]] for r in remitos], remitos)
         analisis = self.servicios.laboratorio.analisis_pendientes(id_laboratorio)
         self.pendientes.cargar([[chip(a["prioridad"]), a["orden"], a["muestra"], formato.etiqueta(a["tipo_muestra"]),
                                  a["analisis"], f"{a['mascota']} ({a['especie']})",
@@ -76,18 +77,50 @@ class LaboratorioVista(Vista):
                 if b.id_laboratorio == id_laboratorio]
 
     # --- Recepción ------------------------------------------------------------------------
+    @staticmethod
+    def _transportista(remito: dict) -> str:
+        """El último transportista y, si sigue en tránsito, en qué punto está ese tramo."""
+        nombre = remito["transportista"] or "—"
+        situacion = remito.get("situacion_tramo")
+        if not situacion:
+            return nombre
+        return f"{nombre} · {formato.etiqueta(situacion).lower()}"
+
     def _acciones_recepcion(self, remito: dict) -> list[ft.Control]:
+        if remito.get("situacion_tramo") == EN_POSTA:
+            return [boton_icono(ft.Icons.INFO_OUTLINE,
+                                "En posta intermedia: el tramo hasta el laboratorio se registra en Logística de muestras",
+                                lambda e: self.notificar.info(
+                                    "Este remito está en una posta intermedia. Registrá el tramo hasta el laboratorio "
+                                    "en Logística de muestras antes de recibirlo."))]
         return [boton_icono(ft.Icons.MOVE_TO_INBOX, "Registrar recepción",
                             self.seguro(lambda e: self._dialogo_recepcion(remito)))]
 
     def _dialogo_recepcion(self, remito: dict) -> None:
+        bloqueado = remito.get("situacion_tramo") == EN_LABORATORIO
         bioquimicos = self._opciones_bioquimicos()
-        bioquimico = selector("Bioquímico que recibe *", bioquimicos, bioquimicos[0][0] if bioquimicos else None)
-        momento = campo_fecha_hora("Fecha y hora de recepción *", fechas.ahora())
+        id_inicial = bioquimicos[0][0] if bioquimicos else None
+        if bloqueado:
+            nombre = remito.get("ultimo_recibido_por") or ""
+            id_inicial = next((clave for clave, texto in bioquimicos if texto.startswith(f"{nombre} · ")), id_inicial)
+        bioquimico = selector("Bioquímico que recibe *", bioquimicos, id_inicial, disabled=bloqueado)
+        llegada = fechas.fecha_hora_desde_sql(remito.get("ultima_llegada")) if bloqueado else None
+        momento = campo_fecha_hora("Fecha y hora de recepción *", llegada or fechas.ahora(), disabled=bloqueado)
+        if bloqueado:
+            momento.suffix = None
         precinto = ft.RadioGroup(value="INTACTO", content=ft.Row([
             ft.Radio(value="INTACTO", label="Intacto"), ft.Radio(value="ROTO", label="Roto / violentado")]))
-        temperatura = campo_numero("Temperatura de arribo (°C)")
+        temp_registrada = remito.get("ultima_temperatura") if bloqueado else None
+        temperatura = campo_numero("Temperatura de arribo (°C)", temp_registrada, disabled=temp_registrada is not None)
         observacion = campo("Motivo / observación (obligatorio si el precinto está roto)")
+        avisos = [ft.Text(f"Precinto colocado en origen: {remito['precinto']}. Verifique su estado antes de abrir la "
+                          "conservadora: si está roto, ninguna muestra podrá procesarse.")]
+        if bloqueado:
+            avisos.append(ft.Text("La fecha, el bioquímico y la temperatura ya registrados al cerrar el tramo no se "
+                                  "vuelven a cargar.", size=12, color=ft.Colors.ON_SURFACE_VARIANT))
+        if bloqueado and temp_registrada is None:
+            avisos.append(ft.Text("No se cargó la temperatura al llegar: completala ahora.", size=12,
+                                  color=ft.Colors.ON_SURFACE_VARIANT))
 
         def registrar(e):
             recibido = self.servicios.laboratorio.registrar_recepcion(
@@ -108,9 +141,7 @@ class LaboratorioVista(Vista):
             self.page.update()
 
         abrir_dialogo(self.page, f"Recepción del remito {remito['numero']}", ft.Column([
-            ft.Text(f"Precinto colocado en origen: {remito['precinto']}. Verifique su estado antes de abrir la "
-                    "conservadora: si está roto, ninguna muestra podrá procesarse."),
-            fila(bioquimico, momento), ft.Text("Estado del precinto", weight=ft.FontWeight.W_600), precinto,
+            *avisos, fila(bioquimico, momento), ft.Text("Estado del precinto", weight=ft.FontWeight.W_600), precinto,
             temperatura, observacion], tight=True, spacing=12),
             [boton_cancelar(self.page), ft.FilledButton("Registrar recepción", icon=ft.Icons.CHECK,
                                                         on_click=self.seguro(registrar))], ancho=620)

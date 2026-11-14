@@ -169,6 +169,68 @@ class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
         muestra = self.s.derivaciones.trazabilidad(orden.muestras[0].id)
         self.assertEqual(muestra.historial().ultimo().responsable, veterinario.nombre_completo())
 
+    def test_llegada_en_posta_y_continuacion_del_tramo(self):
+        _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])
+        remito = self._enviar(orden, id_clinica, veterinario)
+        id_transportista = self.id_de("SELECT MIN(id_transportista) FROM transportista")
+        otro = self.id_de("SELECT MIN(id_transportista) FROM transportista WHERE id_transportista <> ?",
+                          (id_transportista,))
+        bioq = self.s.catalogos.listar("bioquimico")[0]
+        ahora = fechas.ahora()
+        fila = next(r for r in self.s.derivaciones.listar_remitos() if r["id_remito"] == remito.id)
+        self.assertEqual(fila["situacion_tramo"], "EN_CURSO")
+
+        with self.assertRaises(ValidacionError):  # no puede recibir el mismo que trae el tramo
+            self.s.derivaciones.cerrar_tramo(remito.id, ahora, destino_final=False, id_receptor=id_transportista,
+                                             lugar="Posta Norte")
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.cerrar_tramo(remito.id, ahora, destino_final=False, id_receptor=otro,
+                                             lugar=fila["laboratorio"])
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.cerrar_tramo(remito.id, ahora, destino_final=True, id_receptor=99999)
+
+        tramo = self.s.derivaciones.cerrar_tramo(remito.id, ahora, destino_final=False, id_receptor=otro,
+                                                 lugar="Posta Norte", temperatura_llegada=4.5)
+        self.assertEqual(tramo.recibido_por, self.s.catalogos.obtener("transportista", otro).razon_social)
+        self.assertEqual(tramo.destino, "Posta Norte")
+        fila = next(r for r in self.s.derivaciones.listar_remitos() if r["id_remito"] == remito.id)
+        self.assertEqual(fila["situacion_tramo"], "EN_POSTA")
+        with self.assertRaises(ValidacionError):  # en posta no se recibe en el laboratorio
+            self.s.laboratorio.registrar_recepcion(remito.id, bioq.id, True, temperatura_arribo=4.5)
+        with self.assertRaises(ValidacionError):  # el origen y quien entrega salen del tramo anterior
+            self.s.derivaciones.registrar_tramo(remito.id, id_transportista, "Otro lugar", fila["laboratorio"],
+                                                ahora, "Alguien más")
+        self.s.derivaciones.registrar_tramo(remito.id, id_transportista, "Posta Norte", fila["laboratorio"],
+                                            ahora, tramo.recibido_por)
+        fila = next(r for r in self.s.derivaciones.listar_remitos() if r["id_remito"] == remito.id)
+        self.assertEqual(fila["situacion_tramo"], "EN_CURSO")
+        # Se recibe para liberar la conservadora: la suite comparte una sola base.
+        self.s.laboratorio.registrar_recepcion(remito.id, bioq.id, True, temperatura_arribo=4.5, fecha_hora=ahora)
+
+    def test_llegada_al_laboratorio_fija_la_recepcion(self):
+        _, orden, id_clinica, veterinario = self._atencion_con_orden(["BIOQ"])
+        remito = self._enviar(orden, id_clinica, veterinario)
+        bioq, otro = self.s.catalogos.listar("bioquimico")[:2]
+        llegada = fechas.ahora()
+        tramo = self.s.derivaciones.cerrar_tramo(remito.id, llegada, destino_final=True, id_receptor=bioq.id,
+                                                 temperatura_llegada=5.5)
+        self.assertEqual(tramo.recibido_por, bioq.nombre_completo())
+        self.assertEqual(tramo.destino, self.s.derivaciones.obtener_remito(remito.id).nombre_laboratorio)
+        fila = next(r for r in self.s.derivaciones.listar_remitos() if r["id_remito"] == remito.id)
+        self.assertEqual(fila["situacion_tramo"], "EN_LABORATORIO")
+        with self.assertRaises(ValidacionError):
+            self.s.derivaciones.registrar_tramo(remito.id, self.id_de("SELECT MIN(id_transportista) FROM transportista"),
+                                                tramo.destino, "Otro lado", llegada, tramo.recibido_por)
+        with self.assertRaises(ValidacionError):
+            self.s.laboratorio.registrar_recepcion(remito.id, otro.id, True, temperatura_arribo=5.5, fecha_hora=llegada)
+        with self.assertRaises(ValidacionError):
+            self.s.laboratorio.registrar_recepcion(remito.id, bioq.id, True, temperatura_arribo=9, fecha_hora=llegada)
+        recibido = self.s.laboratorio.registrar_recepcion(
+            remito.id, bioq.id, True, temperatura_arribo=5.5, fecha_hora=llegada.replace(second=0) + timedelta(seconds=40))
+        self.assertEqual(recibido.nombre_estado(), "RECIBIDO")
+        self.assertEqual(recibido.recepcion.fecha_hora, tramo.fecha_hora_llegada)
+        self.assertEqual(recibido.recepcion.temperatura_arribo_c, 5.5)
+
     def test_precinto_roto_impide_procesar(self):
         _, orden, id_clinica, veterinario = self._atencion_con_orden(["HEMO"])
         remito = self._enviar(orden, id_clinica, veterinario)

@@ -6,11 +6,11 @@ from app.dominio.estados_remito import estado_remito_desde
 from app.dominio.excepciones import EntidadNoEncontradaError, TransicionInvalidaError, ValidacionError
 from app.dominio.muestra import Muestra
 from app.dominio.personas import Veterinario
-from app.dominio.remito import RemitoBiologico
+from app.dominio.remito import RemitoBiologico, anotar_situacion_tramos, es_arribo_a_laboratorio
 from app.persistencia.conexion import ConexionBD
 from app.persistencia.daos.catalogos_dao import ConservadoraDAO, TransportistaDAO
 from app.persistencia.daos.derivacion_dao import MuestraDAO, OrdenDerivacionDAO
-from app.persistencia.daos.personas_dao import VeterinarioDAO
+from app.persistencia.daos.personas_dao import BioquimicoDAO, VeterinarioDAO
 from app.persistencia.daos.remito_dao import RemitoDAO
 from app.utils import fechas
 
@@ -18,13 +18,14 @@ from app.utils import fechas
 class DerivacionService:
     def __init__(self, muestras: MuestraDAO, remitos: RemitoDAO, conservadoras: ConservadoraDAO,
                  ordenes: OrdenDerivacionDAO, transportistas: TransportistaDAO, veterinarios: VeterinarioDAO,
-                 conexion: ConexionBD):
+                 bioquimicos: BioquimicoDAO, conexion: ConexionBD):
         self._muestras = muestras
         self._remitos = remitos
         self._conservadoras = conservadoras
         self._ordenes = ordenes
         self._transportistas = transportistas
         self._veterinarios = veterinarios
+        self._bioquimicos = bioquimicos
         self._conexion = conexion
 
     # --- Consultas -------------------------------------------------------------------
@@ -52,7 +53,23 @@ class DerivacionService:
 
     def listar_remitos(self, estado: str | None = None, id_laboratorio: int | None = None,
                        id_clinica: int | None = None) -> list[dict]:
-        return self._remitos.listar_resumen(estado, id_laboratorio, id_clinica)
+        filas = self._remitos.listar_resumen(estado, id_laboratorio, id_clinica)
+        anotar_situacion_tramos(filas, self._bioquimicos.listar())
+        return filas
+
+    def receptores_de_llegada(self, id_remito: int, destino_final: bool) -> list[tuple[int, str]]:
+        """Quién puede recibir la conservadora al cerrar el tramo.
+
+        En una posta, otro transportista (no el que trae el tramo). En el laboratorio de destino, un bioquímico.
+        """
+        remito = self.obtener_remito(id_remito)
+        if destino_final:
+            return [(b.id, f"{b.nombre_completo()} · {b.matricula}")
+                    for b in self._bioquimicos.listar_por_laboratorio(remito.id_laboratorio_destino)]
+        actual = remito.tramo_actual()
+        excluir = actual.id_transportista if actual else None
+        return [(t.id, f"{t.razon_social} · {t.patente_vehiculo or ''}")
+                for t in self._transportistas.listar() if t.id != excluir]
 
     @staticmethod
     def operaciones_permitidas(estado: str) -> set[str]:
@@ -178,11 +195,19 @@ class DerivacionService:
             self._actualizar_ordenes(remito)
         return tramo
 
-    def cerrar_tramo(self, id_remito: int, fecha_hora_llegada: datetime, recibido_por: str,
-                     temperatura_llegada: float | None = None, observaciones: str | None = None) -> TramoEnvio:
+    def cerrar_tramo(self, id_remito: int, fecha_hora_llegada: datetime, *, destino_final: bool, id_receptor: int,
+                     lugar: str | None = None, temperatura_llegada: float | None = None,
+                     observaciones: str | None = None) -> TramoEnvio:
+        """Registra la llegada. En una posta recibe otro transportista; en el laboratorio, un bioquímico."""
         remito = self.obtener_remito(id_remito)
+        actual = remito.tramo_actual()
+        if destino_final:
+            recibido_por, destino = self._bioquimico_que_recibe(id_receptor, remito)
+        else:
+            recibido_por, destino = self._transportista_que_recibe(id_receptor, actual, remito.nombre_laboratorio, lugar)
         tramo = remito.cerrar_tramo(fecha_hora_llegada=fecha_hora_llegada, recibido_por=recibido_por,
                                     temperatura_llegada_c=temperatura_llegada, observaciones=observaciones)
+        tramo.destino = destino
         self._remitos.guardar_tramo(tramo)
         return tramo
 
@@ -190,6 +215,7 @@ class DerivacionService:
                         fecha_hora_salida: datetime, entregado_por: str, temperatura_salida: float | None = None,
                         observaciones: str | None = None) -> TramoEnvio:
         remito = self.obtener_remito(id_remito)
+        self._validar_continuacion(remito, origen, entregado_por)
         self._validar_transportista(id_transportista)
         tramo = TramoEnvio(id_transportista=id_transportista, origen=origen, destino=destino,
                            fecha_hora_salida=fecha_hora_salida, entregado_por=entregado_por,
@@ -197,6 +223,42 @@ class DerivacionService:
         remito.registrar_tramo(tramo)
         self._remitos.guardar_tramo(tramo)
         return tramo
+
+    def _bioquimico_que_recibe(self, id_receptor: int | None, remito: RemitoBiologico) -> tuple[str, str]:
+        bioquimico = self._bioquimicos.obtener_por_id(id_receptor) if id_receptor else None
+        if bioquimico is None or bioquimico.id_laboratorio != remito.id_laboratorio_destino:
+            raise ValidacionError("Seleccione un bioquímico del laboratorio de destino.")
+        return bioquimico.nombre_completo(), remito.nombre_laboratorio
+
+    def _transportista_que_recibe(self, id_receptor: int | None, actual: TramoEnvio | None,
+                                  nombre_laboratorio: str, lugar: str | None) -> tuple[str, str]:
+        transportista = self._transportistas.obtener_por_id(id_receptor) if id_receptor else None
+        if transportista is None:
+            raise ValidacionError("Seleccione el transportista que recibe la conservadora.")
+        if actual and transportista.id == actual.id_transportista:
+            raise ValidacionError("En una posta debe recibir otro transportista, no el que trae el tramo.")
+        lugar = (lugar or "").strip()
+        if not lugar:
+            raise ValidacionError("Indique el lugar de entrega.")
+        if lugar == nombre_laboratorio:
+            raise ValidacionError("El lugar de entrega no puede ser el laboratorio de destino.")
+        return transportista.razon_social, lugar
+
+    def _validar_continuacion(self, remito: RemitoBiologico, origen: str, entregado_por: str) -> None:
+        """El tramo siguiente sale de donde llegó el anterior, entregado por quien lo recibió."""
+        actual = remito.tramo_actual()
+        if actual is None or actual.esta_abierto():
+            return
+        if es_arribo_a_laboratorio(actual.destino, actual.recibido_por, remito.nombre_laboratorio,
+                                   self._nombres_bioquimicos(remito.id_laboratorio_destino)):
+            raise ValidacionError("El remito ya llegó al laboratorio. La verificación del precinto se hace en Recepción.")
+        if origen.strip() != actual.destino:
+            raise ValidacionError("El origen del nuevo tramo debe ser el lugar donde llegó el tramo anterior.")
+        if entregado_por.strip() != actual.recibido_por:
+            raise ValidacionError("Quien entrega el nuevo tramo debe ser quien recibió el tramo anterior.")
+
+    def _nombres_bioquimicos(self, id_laboratorio: int) -> set[str]:
+        return {b.nombre_completo() for b in self._bioquimicos.listar_por_laboratorio(id_laboratorio)}
 
     def _validar_transportista(self, id_transportista: int) -> None:
         if self._transportistas.obtener_por_id(id_transportista) is None:

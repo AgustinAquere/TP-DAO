@@ -45,7 +45,7 @@ class Servicios:
         self.atenciones = AtencionService(atenciones, historias, self.mascotas, veterinarios, turnos, vacunas, esquemas,
                                           ordenes, tipos_analisis, laboratorios, bd)
         self.derivaciones = DerivacionService(muestras, remitos, conservadoras, ordenes, transportistas, veterinarios,
-                                              bd)
+                                              bioquimicos, bd)
         self.laboratorio = LaboratorioService(remitos, recepciones, muestras, ordenes, resultados, bioquimicos,
                                               conservadoras, bd)
         self.facturacion = FacturacionService(comprobantes, atenciones, servicios_clinicos, ordenes)
