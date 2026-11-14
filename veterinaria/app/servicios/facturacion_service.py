@@ -92,5 +92,6 @@ class FacturacionService:
             raise EntidadNoEncontradaError("el comprobante", id_comprobante)
         return comprobante
 
-    def listar(self, desde: date | None = None, hasta: date | None = None, id_clinica: int | None = None) -> list[dict]:
-        return self._comprobantes.listar_resumen(desde, hasta, id_clinica)
+    def listar(self, desde: date | None = None, hasta: date | None = None, id_clinica: int | None = None,
+               texto: str = "") -> list[dict]:
+        return self._comprobantes.listar_resumen(desde, hasta, id_clinica, texto)
