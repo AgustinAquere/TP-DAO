@@ -24,6 +24,7 @@ def porcentaje(valor: float | None, decimales: int = 1) -> str:
 _ETIQUETAS = {
     "EXTRAIDA": "Extraída", "EN_TRANSITO": "En tránsito", "EN_PREPARACION": "En preparación",
     "SERVICIO_CLINICO": "Servicio clínico", "ANALISIS_LABORATORIO": "Análisis de laboratorio",
+    "EN_CURSO": "En curso", "EN_POSTA": "En posta", "EN_LABORATORIO": "En lab. (s/verificar)",
 }
 
 

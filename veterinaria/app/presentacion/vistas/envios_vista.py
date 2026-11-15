@@ -1,6 +1,7 @@
 """Procesos 4 y 5: empaquetar muestras (remito biológico + precinto sanitario) y registrar la cadena de envío."""
 import flet as ft
 
+from app.dominio.remito import EN_CURSO, EN_LABORATORIO, EN_POSTA
 from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha_hora,
                                           campo_numero, cargar_opciones, chip, confirmar, encabezado, fila,
                                           leer_decimal, leer_fecha_hora, leer_id, leer_texto, seccion, selector)
@@ -17,9 +18,19 @@ def _rango(m: dict) -> str:
     return f"{m['temp_min_requerida']:g} a {m['temp_max_requerida']:g} °C"
 
 
+def _tramos(remito: dict) -> str:
+    """Cantidad de tramos y, si el remito sigue en tránsito, en qué punto está el último."""
+    cantidad = str(remito["cantidad_tramos"])
+    situacion = remito.get("situacion_tramo")
+    if not situacion:
+        return cantidad
+    return f"{cantidad} · {formato.etiqueta(situacion).lower()}"
+
+
 class EnviosVista(Vista):
     def construir(self) -> ft.Control:
-        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True, content=ft.Column([
+        self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
+                                 on_change=self.sincronizar_pestania("envios"), content=ft.Column([
             ft.TabBar(tabs=[ft.Tab(label="Armar remito", icon=ft.Icons.INVENTORY_2),
                             ft.Tab(label="Remitos y cadena de envío", icon=ft.Icons.LOCAL_SHIPPING)]),
             ft.TabBarView(controls=[self._construir_armado(), self._construir_remitos()], expand=True),
@@ -28,7 +39,9 @@ class EnviosVista(Vista):
                                      "Conservadoras isotérmicas, remito biológico, precinto sanitario y tramos de envío"),
                           self.pestanias], expand=True, spacing=10)
 
-    def al_mostrar(self, **contexto) -> None:
+    def al_mostrar(self, pestania: int | None = None, **contexto) -> None:
+        if pestania is not None:
+            self.pestanias.selected_index = pestania
         clinicas = self.opciones_clinicas()
         cargar_opciones(self.clinica, clinicas)
         if self.clinica.value is None and clinicas:
@@ -98,13 +111,17 @@ class EnviosVista(Vista):
                               r["clinica"], r["laboratorio"], r["conservadora"], r["cantidad_muestras"],
                               ft.Row([ft.Text(r["precinto"] or "—"), chip(r["estado_precinto"])] if r["precinto"]
                                      else [ft.Text("—")]),
-                              r["cantidad_tramos"], r["transportista"] or "—"] for r in remitos], remitos)
+                              _tramos(r), r["transportista"] or "—"] for r in remitos], remitos)
 
     def _acciones(self, remito: dict) -> list[ft.Control]:
-        """Las acciones disponibles las decide el estado del remito (patrón State)."""
+        """Las acciones las decide el estado del remito y, en tránsito, si el tramo está abierto, en posta o en el lab."""
         operaciones = self.servicios.derivaciones.operaciones_permitidas(remito["estado"])
+        situacion = remito.get("situacion_tramo")
         acciones = [boton_icono(ft.Icons.VISIBILITY, "Ver detalle y cadena de custodia",
                                 self.seguro(lambda e: self._detalle(remito["id_remito"])))]
+        if situacion == EN_LABORATORIO:
+            acciones.append(boton_icono(ft.Icons.MOVE_TO_INBOX, "Verificar el precinto en Recepción",
+                                        lambda e: self.app.navegar("laboratorio", pestania=0)))
         disponibles = [
             ("precintar", ft.Icons.LOCK, "Precintar", lambda e: self._dialogo_precintar(remito)),
             ("despachar", ft.Icons.LOCAL_SHIPPING, "Despachar", lambda e: self._dialogo_despachar(remito)),
@@ -118,8 +135,18 @@ class EnviosVista(Vista):
                 "Anular", peligroso=True)),
         ]
         acciones += [boton_icono(icono, ayuda, self.seguro(accion)) for operacion, icono, ayuda, accion in disponibles
-                     if operacion in operaciones]
+                     if self._operacion_visible(operacion, operaciones, situacion)]
         return acciones
+
+    @staticmethod
+    def _operacion_visible(operacion: str, operaciones: set[str], situacion: str | None) -> bool:
+        if operacion not in operaciones:
+            return False
+        if operacion == "cerrar_tramo":
+            return situacion == EN_CURSO
+        if operacion == "registrar_tramo":
+            return situacion == EN_POSTA
+        return True
 
     def _despues(self, mensaje: str) -> None:
         self.page.pop_dialog()
@@ -136,11 +163,11 @@ class EnviosVista(Vista):
 
     def _dialogo_precintar(self, remito: dict) -> None:
         numero = campo("N.º de precinto (vacío = automático)")
-        responsable = campo("Responsable del empaquetado *")
+        responsable = selector("Responsable del empaquetado *", self._opciones_responsables(remito["id_clinica_origen"]))
         momento = campo_fecha_hora("Fecha y hora de colocación *", fechas.ahora())
 
         def precintar(e):
-            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_texto(responsable, True),
+            precinto = self.servicios.derivaciones.precintar(remito["id_remito"], leer_id(responsable, True),
                                                              leer_texto(numero), leer_fecha_hora(momento, True))
             self._despues(f"Remito precintado con el precinto {precinto.numero}. Muestras empaquetadas.")
 
@@ -150,19 +177,25 @@ class EnviosVista(Vista):
                       [boton_cancelar(self.page), ft.FilledButton("Precintar", icon=ft.Icons.LOCK,
                                                                   on_click=self.seguro(precintar))])
 
-    def _opciones_transportistas(self) -> list[tuple]:
-        return [(t.id, f"{t.razon_social} · {t.patente_vehiculo or ''}") for t in self.servicios.catalogos.listar("transportista")]
+    def _opciones_responsables(self, id_clinica: int) -> list[tuple]:
+        """Solo el personal de la clínica de origen puede precintar el remito y entregarlo al transportista."""
+        return [(v.id, f"{v.nombre_completo()} · {v.matricula}")
+                for v in self.servicios.derivaciones.veterinarios_de_clinica(id_clinica)]
+
+    def _opciones_transportistas(self, excluir: int | None = None) -> list[tuple]:
+        return [(t.id, f"{t.razon_social} · {t.patente_vehiculo or ''}")
+                for t in self.servicios.catalogos.listar("transportista") if t.id != excluir]
 
     def _dialogo_despachar(self, remito: dict) -> None:
         transportista = selector("Transportista *", self._opciones_transportistas())
-        entregado = campo("Entregado por *")
+        entregado = selector("Entregado por *", self._opciones_responsables(remito["id_clinica_origen"]))
         temperatura = campo_numero("Temperatura de salida (°C)")
         salida = campo_fecha_hora("Fecha y hora de salida *", fechas.ahora())
         destino = campo("Destino del tramo", remito["laboratorio"])
 
         def despachar(e):
             self.servicios.derivaciones.despachar(remito["id_remito"], leer_id(transportista, True),
-                                                  leer_texto(entregado, True), leer_decimal(temperatura),
+                                                  leer_id(entregado, True), leer_decimal(temperatura),
                                                   leer_fecha_hora(salida, True), leer_texto(destino))
             self._despues("Remito despachado: el primer tramo de la cadena de custodia quedó registrado.")
 
@@ -174,26 +207,52 @@ class EnviosVista(Vista):
 
     def _dialogo_cerrar_tramo(self, remito: dict) -> None:
         llegada = campo_fecha_hora("Fecha y hora de llegada *", fechas.ahora())
-        recibido = campo("Recibido por *")
         temperatura = campo_numero("Temperatura de llegada (°C)")
+        tipo = ft.RadioGroup(value="FINAL", content=ft.Column([
+            ft.Radio(value="INTERMEDIO", label="Tramo intermedio: recibe otro transportista"),
+            ft.Radio(value="FINAL", label="Destino final: recibe un bioquímico del laboratorio"),
+        ], spacing=0))
+        recibido = selector("Bioquímico que recibe *", [])
+        lugar = campo("Lugar de entrega *", visible=False,
+                      helper="Depósito o dirección donde otro transportista recibe la conservadora.")
+        nota = ft.Text(f"Queda en {remito['laboratorio']}. Después hay que verificar el precinto en Recepción.",
+                       size=12, color=ft.Colors.ON_SURFACE_VARIANT)
         observaciones = campo("Observaciones")
 
-        def cerrar(e):
-            self.servicios.derivaciones.cerrar_tramo(remito["id_remito"], leer_fecha_hora(llegada, True),
-                                                     leer_texto(recibido, True), leer_decimal(temperatura),
-                                                     leer_texto(observaciones))
-            self._despues("Llegada del tramo registrada.")
+        def aplicar_tipo(e=None):
+            final = tipo.value == "FINAL"
+            recibido.label = "Bioquímico que recibe *" if final else "Transportista que recibe *"
+            lugar.visible = not final
+            nota.visible = final
+            cargar_opciones(recibido, self.servicios.derivaciones.receptores_de_llegada(remito["id_remito"], final),
+                            conservar=False)
+            if e is not None:
+                self.page.update()
 
+        def cerrar(e):
+            final = tipo.value == "FINAL"
+            self.servicios.derivaciones.cerrar_tramo(
+                remito["id_remito"], leer_fecha_hora(llegada, True), destino_final=final,
+                id_receptor=leer_id(recibido, True), lugar=leer_texto(lugar, not final),
+                temperatura_llegada=leer_decimal(temperatura), observaciones=leer_texto(observaciones))
+            self._despues("Llegada al laboratorio registrada. Queda pendiente la verificación del precinto en Recepción."
+                          if final else "Llegada a la posta registrada. Ya se puede iniciar el tramo siguiente.")
+
+        tipo.on_change = self.seguro(aplicar_tipo)
+        aplicar_tipo()
         abrir_dialogo(self.page, f"Llegada del tramo actual · {remito['numero']}",
-                      ft.Column([fila(llegada, temperatura), recibido, observaciones], tight=True, spacing=12),
-                      [boton_cancelar(self.page), ft.FilledButton("Registrar llegada", on_click=self.seguro(cerrar))])
+                      ft.Column([fila(llegada, temperatura), ft.Text("Dónde llega", weight=ft.FontWeight.W_600), tipo,
+                                 recibido, lugar, nota, observaciones], tight=True, spacing=12),
+                      [boton_cancelar(self.page), ft.FilledButton("Registrar llegada", on_click=self.seguro(cerrar))],
+                      ancho=640)
 
     def _dialogo_nuevo_tramo(self, remito: dict) -> None:
         actual = self.servicios.derivaciones.obtener_remito(remito["id_remito"]).tramo_actual()
-        transportista = selector("Transportista *", self._opciones_transportistas())
-        origen, destino = campo("Origen *", actual.destino), campo("Destino *", remito["laboratorio"])
+        transportista = selector("Transportista *", self._opciones_transportistas(actual.id_transportista))
+        origen = campo("Origen *", actual.destino, disabled=True)
+        destino = campo("Destino *", remito["laboratorio"])
         salida = campo_fecha_hora("Fecha y hora de salida *", fechas.ahora())
-        entregado = campo("Entregado por *", actual.recibido_por)
+        entregado = campo("Entregado por *", actual.recibido_por, disabled=True)
         temperatura = campo_numero("Temperatura de salida (°C)")
 
         def registrar(e):

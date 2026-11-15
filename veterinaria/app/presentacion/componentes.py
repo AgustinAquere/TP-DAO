@@ -1,8 +1,9 @@
 """Controles y funciones reutilizables por todas las vistas: tablas, formularios, diálogos y avisos."""
+import asyncio
 import logging
 import os
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, time
 from functools import wraps
 from pathlib import Path
 
@@ -72,9 +73,19 @@ def abrir_dialogo(page: ft.Page, titulo: str, contenido: ft.Control, acciones: l
                   ancho: int = 560, alto: int | None = None) -> ft.AlertDialog:
     if isinstance(contenido, ft.Column):  # los campos del formulario ocupan todo el ancho del diálogo
         contenido.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
-    dialogo = ft.AlertDialog(modal=True, title=ft.Text(titulo, weight=ft.FontWeight.BOLD),
-                             content=ft.Container(contenido, width=ancho, height=alto), actions=acciones,
-                             actions_alignment=ft.MainAxisAlignment.END)
+        if alto is None:
+            # Sin alto fijo el diálogo se encoge al contenido; el scroll lo maneja el AlertDialog.
+            contenido.tight = True
+            contenido.scroll = None
+    ancho_ventana = page.width or page.window.width or ancho
+    alto_ventana = page.height or page.window.height or (alto or 700)
+    ancho_max = int(ancho_ventana * 0.9)
+    alto_max = int(alto_ventana * 0.82)
+    dialogo = ft.AlertDialog(
+        modal=True, scrollable=alto is None, title=ft.Text(titulo, weight=ft.FontWeight.BOLD),
+        content=ft.Container(contenido, width=min(ancho, ancho_max),
+                             height=min(alto, alto_max) if alto else None),
+        actions=acciones, actions_alignment=ft.MainAxisAlignment.END)
     page.show_dialog(dialogo)
     return dialogo
 
@@ -117,12 +128,114 @@ def campo_numero(etiqueta: str, valor=None, **opciones) -> ft.TextField:
     return campo(etiqueta, numero_editable(valor), keyboard_type=ft.KeyboardType.NUMBER, **opciones)
 
 
-def campo_fecha(etiqueta: str, valor: date | None = None, **opciones) -> ft.TextField:
-    return campo(etiqueta, fechas.formatear_fecha(valor), hint_text="dd/mm/aaaa", **opciones)
+_LOCALE = ft.Locale("es", "AR")
 
 
-def campo_fecha_hora(etiqueta: str, valor: datetime | None = None, **opciones) -> ft.TextField:
-    return campo(etiqueta, fechas.formatear_fecha_hora(valor), hint_text="dd/mm/aaaa hh:mm", **opciones)
+def _fecha_elegida(valor) -> date | None:
+    if isinstance(valor, datetime):
+        return valor.date()
+    return valor if isinstance(valor, date) else None
+
+
+def _boton_sufijo(icono, ayuda: str, al_hacer_clic: Callable) -> ft.Container:
+    """Ícono clickeable dentro del campo de texto (más chico que un IconButton, no agranda el campo)."""
+    return ft.Container(ft.Icon(icono, size=18, color=ft.Colors.ON_SURFACE_VARIANT), width=28, height=28,
+                        alignment=ft.Alignment.CENTER, tooltip=ayuda, on_click=al_hacer_clic)
+
+
+def _abrir_calendario(page: ft.Page, titulo: str, inicial: date, al_elegir: Callable[[date, object], None]) -> None:
+    def seleccionar(e):
+        elegida = _fecha_elegida(e.control.value)
+        if elegida is not None:
+            al_elegir(elegida, e)
+
+    page.show_dialog(ft.DatePicker(
+        value=inicial, help_text=titulo, cancel_text="Cancelar", confirm_text="Aceptar",
+        error_format_text="Usá el formato dd/mm/aaaa.", error_invalid_text="Esa fecha no está permitida.",
+        locale=_LOCALE, on_change=seleccionar))
+
+
+async def _despues_de_cerrar(page: ft.Page, dialogo: ft.DialogControl, accion: Callable[[], None]) -> None:
+    """Ejecuta `accion` cuando Flet terminó de cerrar `dialogo`.
+
+    Flet saca el diálogo de la pila recién al terminar la animación de cierre; si en ese lapso se abre
+    otro diálogo, el cierre del primero se lleva puesto también al nuevo.
+    """
+    for _ in range(40):  # 2 segundos como máximo
+        if dialogo not in page._dialogs.controls:  # noqa: SLF001 - Flet no expone la pila de diálogos
+            break
+        await asyncio.sleep(0.05)
+    accion()
+
+
+def _abrir_reloj(page: ft.Page, titulo: str, inicial: time, al_elegir: Callable[[time, object], None]) -> None:
+    def seleccionar(e):
+        if isinstance(e.control.value, time):
+            al_elegir(e.control.value.replace(second=0, microsecond=0), e)
+
+    page.show_dialog(ft.TimePicker(
+        value=inicial, help_text=titulo, cancel_text="Cancelar", confirm_text="Aceptar",
+        hour_label_text="Hora", minute_label_text="Minutos", error_invalid_text="Ingresá una hora válida.",
+        hour_format=ft.TimePickerHourFormat.H24, locale=_LOCALE, on_change=seleccionar))
+
+
+def campo_fecha(etiqueta: str, valor: date | None = None, *, al_cambiar: Callable | None = None,
+                **opciones) -> ft.TextField:
+    """Fecha dd/mm/aaaa. Se puede tipear o elegirla en el calendario del ícono."""
+    opciones.setdefault("hint_text", "dd/mm/aaaa")
+    control = campo(etiqueta, fechas.formatear_fecha(valor), **opciones)
+
+    def fijar(elegida: date, e) -> None:
+        control.value = fechas.formatear_fecha(elegida)
+        control.update()
+        if al_cambiar:
+            al_cambiar(e)
+
+    def abrir_calendario(e):
+        try:
+            inicial = fechas.parsear_fecha(control.value) or date.today()
+        except ValueError:
+            inicial = date.today()
+        _abrir_calendario(e.page, etiqueta, inicial, fijar)
+
+    control.suffix = _boton_sufijo(ft.Icons.CALENDAR_MONTH_OUTLINED, "Elegir en el calendario", abrir_calendario)
+    return control
+
+
+def campo_fecha_hora(etiqueta: str, valor: datetime | None = None, *, al_cambiar: Callable | None = None,
+                     **opciones) -> ft.TextField:
+    """Fecha y hora dd/mm/aaaa hh:mm. Se puede tipear, o elegir el día en el calendario (y después la hora)
+    o solo la hora en el reloj."""
+    opciones.setdefault("hint_text", "dd/mm/aaaa hh:mm")
+    control = campo(etiqueta, fechas.formatear_fecha_hora(valor), **opciones)
+
+    def actual() -> datetime:
+        try:
+            return fechas.parsear_fecha_hora(control.value) or fechas.ahora()
+        except ValueError:
+            return fechas.ahora()
+
+    def fijar(momento: datetime, e) -> None:
+        control.value = fechas.formatear_fecha_hora(momento)
+        control.update()
+        if al_cambiar:
+            al_cambiar(e)
+
+    def elegir_hora(page: ft.Page) -> None:
+        _abrir_reloj(page, etiqueta, actual().time(),
+                     lambda hora, e: fijar(datetime.combine(actual().date(), hora), e))
+
+    def elegir_dia(dia: date, e) -> None:
+        fijar(datetime.combine(dia, actual().time()), e)  # si cancela el reloj, queda el día con la hora anterior
+        pagina = e.page
+        pagina.run_task(_despues_de_cerrar, pagina, e.control, lambda: elegir_hora(pagina))
+
+    control.suffix = ft.Row([
+        _boton_sufijo(ft.Icons.CALENDAR_MONTH_OUTLINED, "Elegir fecha y hora",
+                      lambda e: _abrir_calendario(e.page, etiqueta, actual().date(), elegir_dia)),
+        _boton_sufijo(ft.Icons.SCHEDULE, "Elegir solo la hora", lambda e: elegir_hora(e.page)),
+    ], spacing=0, tight=True)
+    return control
 
 
 def selector(etiqueta: str, opciones: list[tuple], valor=None, filtrable: bool = False, **extra) -> ft.Dropdown:
@@ -201,6 +314,12 @@ def fila(*controles: ft.Control, espacio: int = 12) -> ft.Row:
     for control in controles:
         control.expand = True
     return ft.Row(list(controles), spacing=espacio, vertical_alignment=ft.CrossAxisAlignment.START)
+
+
+def a_lo_ancho(control: ft.Control, col: dict) -> ft.Row:
+    """Celda de ResponsiveRow que el control (con expand=True) ocupa entera: la celda solo pone un ancho
+    máximo, y un Dropdown suelto se achica a su contenido en lugar de llenarla."""
+    return ft.Row([control], col=col)
 
 
 # --- Presentación de datos -----------------------------------------------------------------

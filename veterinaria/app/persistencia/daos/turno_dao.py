@@ -39,10 +39,14 @@ class TurnoDAO(BaseDAO[Turno]):
         self.conexion.ejecutar("UPDATE turno SET estado = ? WHERE id_turno = ?", (turno.estado.value, turno.id))
 
     def listar_resumen(self, fecha: date | None = None, id_veterinario: int | None = None,
-                       estado: EstadoTurno | None = None, id_mascota: int | None = None) -> list[dict]:
+                       estado: EstadoTurno | None = None, id_mascota: int | None = None, *,
+                       desde: date | None = None, hasta: date | None = None) -> list[dict]:
+        """`fecha` filtra un día. `desde` y `hasta` (inclusive) filtran una semana u otro rango."""
         condiciones, parametros = ["1 = 1"], []
         filtros = [
             (fecha, "date(t.fecha_hora_inicio) = ?", fechas.a_sql(fecha)),
+            (desde, "date(t.fecha_hora_inicio) >= ?", fechas.a_sql(desde)),
+            (hasta, "date(t.fecha_hora_inicio) <= ?", fechas.a_sql(hasta)),
             (id_veterinario, "t.id_veterinario = ?", id_veterinario),
             (estado, "t.estado = ?", getattr(estado, "value", estado)),
             (id_mascota, "t.id_mascota = ?", id_mascota),

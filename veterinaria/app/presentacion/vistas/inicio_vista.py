@@ -29,29 +29,35 @@ class InicioVista(Vista):
 
     def al_mostrar(self, **contexto) -> None:
         datos = self.servicios.reportes.tablero()
-        ir = lambda clave: (lambda e: self.app.navegar(clave))
+        def ir(clave, **ctx):
+            return lambda e: self.app.navegar(clave, **ctx)
+
         tarjetas = [
-            ("Clientes activos", formato.numero(datos["clientes"], 0), ft.Icons.PEOPLE, ft.Colors.TEAL_700, "clientes"),
-            ("Mascotas registradas", formato.numero(datos["mascotas"], 0), ft.Icons.PETS, ft.Colors.BROWN_400, "mascotas"),
-            ("Turnos pendientes hoy", formato.numero(datos["turnos_hoy"], 0), ft.Icons.EVENT, ft.Colors.BLUE_700, "turnos"),
+            ("Clientes activos", formato.numero(datos["clientes"], 0), ft.Icons.PEOPLE, ft.Colors.TEAL_700,
+             "clientes", {}),
+            ("Mascotas registradas", formato.numero(datos["mascotas"], 0), ft.Icons.PETS, ft.Colors.BROWN_400,
+             "mascotas", {}),
+            ("Turnos pendientes hoy", formato.numero(datos["turnos_hoy"], 0), ft.Icons.EVENT, ft.Colors.BLUE_700,
+             "turnos", {}),
             ("Atenciones del mes", formato.numero(datos["atenciones_mes"], 0), ft.Icons.MEDICAL_SERVICES,
-             ft.Colors.INDIGO_500, "atenciones"),
+             ft.Colors.INDIGO_500, "atenciones", {"pestania": 1}),
             ("Vacunas obligatorias pendientes", formato.numero(datos["vacunas_pendientes"], 0), ft.Icons.VACCINES,
-             ft.Colors.ORANGE_800, "reportes"),
+             ft.Colors.ORANGE_800, "reportes", {}),
             ("Muestras por empaquetar", formato.numero(datos["muestras_por_empaquetar"], 0), ft.Icons.INVENTORY_2,
-             ft.Colors.BLUE_GREY_600, "envios"),
+             ft.Colors.BLUE_GREY_600, "envios", {"pestania": 0}),
             ("Remitos en tránsito", formato.numero(datos["remitos_en_transito"], 0), ft.Icons.LOCAL_SHIPPING,
-             ft.Colors.AMBER_800, "laboratorio"),
+             ft.Colors.AMBER_800, "laboratorio", {"pestania": 0}),
             ("Análisis pendientes de resultado", formato.numero(datos["analisis_pendientes"], 0), ft.Icons.BIOTECH,
-             ft.Colors.PURPLE_500, "laboratorio"),
+             ft.Colors.PURPLE_500, "laboratorio", {"pestania": 1}),
             ("Atenciones sin facturar", formato.numero(datos["atenciones_sin_facturar"], 0), ft.Icons.RECEIPT_LONG,
-             ft.Colors.RED_400, "facturacion"),
+             ft.Colors.RED_400, "facturacion", {"pestania": 0}),
             ("Facturado en el mes", formato.moneda(datos["facturado_mes"]), ft.Icons.PAYMENTS, ft.Colors.GREEN_700,
-             "facturacion"),
+             "facturacion", {"pestania": 1}),
         ]
         self.indicadores.controls = [
-            ft.Container(tarjeta_indicador(titulo, valor, icono, color, ir(destino)), col={"sm": 6, "md": 4, "xl": 2.4})
-            for titulo, valor, icono, color, destino in tarjetas]
+            ft.Container(tarjeta_indicador(titulo, valor, icono, color, ir(destino, **extra)),
+                         col={"sm": 6, "md": 4, "xl": 2.4})
+            for titulo, valor, icono, color, destino, extra in tarjetas]
         turnos = self.servicios.turnos.listar(fecha=date.today())
         self.turnos.cargar([[t["fecha_hora_inicio"][11:16], t["mascota"], t["responsable"], t["veterinario"],
                              t["clinica"], chip(t["estado"])] for t in turnos])

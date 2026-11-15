@@ -142,7 +142,15 @@ class RemitoDAO(BaseDAO[RemitoBiologico]):
                    (SELECT MIN(te.fecha_hora_salida) FROM tramo_envio te WHERE te.id_remito = r.id_remito) AS salida,
                    (SELECT COUNT(*) FROM tramo_envio te WHERE te.id_remito = r.id_remito) AS cantidad_tramos,
                    (SELECT t.razon_social FROM tramo_envio te JOIN transportista t ON t.id_transportista = te.id_transportista
-                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS transportista
+                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS transportista,
+                   (SELECT te.fecha_hora_llegada FROM tramo_envio te
+                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS ultima_llegada,
+                   (SELECT te.destino FROM tramo_envio te
+                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS ultimo_destino,
+                   (SELECT te.recibido_por FROM tramo_envio te
+                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS ultimo_recibido_por,
+                   (SELECT te.temperatura_llegada_c FROM tramo_envio te
+                     WHERE te.id_remito = r.id_remito ORDER BY te.nro_orden DESC LIMIT 1) AS ultima_temperatura
               FROM remito_biologico r
               JOIN clinica cl ON cl.id_clinica = r.id_clinica_origen
               JOIN laboratorio_central lab ON lab.id_laboratorio = r.id_laboratorio_destino

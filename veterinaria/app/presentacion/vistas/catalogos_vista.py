@@ -19,6 +19,13 @@ from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, 
 from app.presentacion.vistas.base_vista import Vista
 from app.utils import formato
 
+# Subconjuntos que abre el menú lateral. El orden sigue el de `catalogos`.
+GRUPOS_CATALOGO = {
+    "red": ("veterinario", "clinica", "laboratorio", "bioquimico"),
+    "logistica": ("conservadora", "transportista"),
+    "practicas": ("tipo_analisis", "servicio", "vacuna", "esquema", "especie"),
+}
+
 
 def _leer_seleccion(control: ft.Dropdown, requerido: bool):
     """Las claves numéricas son identificadores; las demás, valores de una enumeración."""
@@ -127,13 +134,30 @@ class CatalogosVista(Vista):
                        [ft.FilledButton("Nuevo", icon=ft.Icons.ADD, on_click=self.seguro(lambda e: self._formulario(None)))]),
             self.selector, self.contenedor], expand=True, spacing=12)
 
-    def al_mostrar(self, **contexto) -> None:
+    def al_mostrar(self, grupo: str | None = None, **contexto) -> None:
+        if grupo:
+            self._mostrar_grupo(grupo)
         self.tabla = Tabla([titulo for titulo, _ in self._actual.columnas], acciones=self._acciones)
         objetos = self.servicios.catalogos.listar(self._actual.entidad)
         self.tabla.cargar([[mostrar(o) for _, mostrar in self._actual.columnas] for o in objetos], objetos)
         self.contenedor.content = self.tabla.control
 
+    def _mostrar_grupo(self, grupo: str) -> None:
+        """Deja en el selector solo los catálogos del grupo elegido en el menú."""
+        entidades = GRUPOS_CATALOGO.get(grupo)
+        if not entidades:
+            return
+        visibles = [c for c in self.catalogos if c.entidad in entidades]
+        self.selector.options = [ft.DropdownOption(key=c.entidad, text=c.titulo) for c in visibles]
+        if self.selector.value not in entidades:
+            self._actual = visibles[0]
+            self.selector.value = self._actual.entidad
+        else:
+            self._actual = next(c for c in visibles if c.entidad == self.selector.value)
+
     def _cambiar(self, e) -> None:
+        if not self.selector.value:
+            return
         self._actual = next(c for c in self.catalogos if c.entidad == self.selector.value)
         self.al_mostrar()
 

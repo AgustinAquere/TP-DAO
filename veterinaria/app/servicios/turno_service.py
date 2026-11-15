@@ -55,13 +55,31 @@ class TurnoService:
         turno.marcar_ausente()
         self._turnos.actualizar_estado(turno)
 
+    def reactivar(self, id_turno: int) -> None:
+        """Vuelve a reservado un turno ausente o cancelado. Si estaba cancelado, el horario debe seguir libre."""
+        turno = self._obtener(id_turno)
+        if turno.estado == EstadoTurno.CANCELADO:
+            conflicto = self.agenda(turno.id_veterinario, turno.fecha_hora_inicio.date()).conflicto_al_reservar(turno)
+            if conflicto:
+                raise TurnoSuperpuestoError(
+                    f"No se puede volver a reservar: el horario se superpone con otro turno "
+                    f"({conflicto.fecha_hora_inicio:%H:%M} a {conflicto.fecha_hora_fin():%H:%M}).")
+        turno.reactivar()
+        try:
+            self._turnos.actualizar_estado(turno)
+        except ErrorPersistencia as error:
+            if "superpone" in str(error):
+                raise TurnoSuperpuestoError(str(error)) from error
+            raise
+
     def horarios_disponibles(self, id_veterinario: int, fecha: date, duracion: int) -> list[datetime]:
         desde = fechas.ahora() if fecha == date.today() else None
         return self.agenda(id_veterinario, fecha).turnos_disponibles(duracion, desde)
 
     def listar(self, fecha: date | None = None, id_veterinario: int | None = None,
-               estado: EstadoTurno | None = None, id_mascota: int | None = None) -> list[dict]:
-        return self._turnos.listar_resumen(fecha, id_veterinario, estado, id_mascota)
+               estado: EstadoTurno | None = None, id_mascota: int | None = None, *,
+               desde: date | None = None, hasta: date | None = None) -> list[dict]:
+        return self._turnos.listar_resumen(fecha, id_veterinario, estado, id_mascota, desde=desde, hasta=hasta)
 
     def pendientes_de_atencion(self, fecha: date | None = None) -> list[dict]:
         return self._turnos.listar_resumen(fecha or date.today(), estado=EstadoTurno.RESERVADO)

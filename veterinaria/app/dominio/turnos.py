@@ -49,6 +49,14 @@ class Turno:
     def marcar_ausente(self) -> None:
         self._cambiar_estado(EstadoTurno.AUSENTE)
 
+    def reactivar(self) -> None:
+        """Vuelve a reservado un turno ausente o cancelado. Un turno atendido no se revierte."""
+        if self.estado not in (EstadoTurno.AUSENTE, EstadoTurno.CANCELADO):
+            raise TransicionInvalidaError(
+                f"El turno está {self.estado.value.lower()}; solo se puede volver a reservar "
+                "un turno ausente o cancelado.")
+        self.estado = EstadoTurno.RESERVADO
+
 
 class Agenda:
     """Turnos de un veterinario en una fecha. No se persiste: es una vista sobre la tabla turno."""
@@ -82,7 +90,7 @@ class Agenda:
         if inicio < self._inicio_jornada() or nuevo.fecha_hora_fin() > self._fin_jornada():
             raise ValidacionError(
                 f"El turno debe estar dentro de la jornada ({config.JORNADA_INICIO:%H:%M} a {config.JORNADA_FIN:%H:%M}).")
-        conflicto = next((t for t in self._turnos if nuevo.se_superpone_con(t)), None)
+        conflicto = self.conflicto_al_reservar(nuevo)
         if conflicto:
             raise TurnoSuperpuestoError(
                 f"El turno se superpone con otro del veterinario "
@@ -106,3 +114,10 @@ class Agenda:
             return not any(prueba.se_superpone_con(t) for t in self._turnos)
 
         return [h for h in filter(libre, candidatos) if desde is None or h >= desde]
+
+    def conflicto_al_reservar(self, turno: Turno) -> Turno | None:
+        """Otro turno activo que ocuparía el mismo intervalo si este quedara reservado."""
+        prueba = Turno(id=turno.id, id_veterinario=turno.id_veterinario, id_mascota=turno.id_mascota,
+                       id_clinica=turno.id_clinica, fecha_hora_inicio=turno.fecha_hora_inicio,
+                       duracion_min=turno.duracion_min, estado=EstadoTurno.RESERVADO)
+        return next((t for t in self._turnos if prueba.se_superpone_con(t)), None)
