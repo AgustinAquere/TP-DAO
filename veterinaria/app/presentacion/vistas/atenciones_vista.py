@@ -6,22 +6,16 @@ import flet as ft
 from app.dominio.atencion import Tratamiento
 from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion, TipoMuestra
 from app.dominio.excepciones import EsquemaVacunasIncompletoError, ValidacionError
-from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha,
-                                          campo_fecha_hora, campo_numero, cargar_opciones, chip, confirmar, encabezado,
-                                          fila, leer_decimal, leer_fecha, leer_fecha_hora, leer_id, leer_texto,
-                                          numero_editable, seccion, selector)
+from app.presentacion.componentes import (Tabla, a_lo_ancho, abrir_dialogo, boton_cancelar, boton_icono, campo,
+                                          campo_fecha, campo_fecha_hora, campo_numero, cargar_opciones, chip, confirmar,
+                                          encabezado, fila, leer_decimal, leer_fecha, leer_fecha_hora, leer_id,
+                                          leer_texto, numero_editable, seccion, selector)
 from app.presentacion.vistas.base_vista import Vista
 from app.servicios.atencion_service import SolicitudDerivacion
 from app.utils import fechas, formato
 
 TIPOS_ATENCION = [(t.value, formato.etiqueta(t)) for t in TipoAtencion]
 PRIORIDADES = [(p.value, formato.etiqueta(p)) for p in Prioridad]
-
-
-def a_lo_ancho(control: ft.Control, col: dict) -> ft.Row:
-    """Celda de ResponsiveRow que el control (con expand=True) ocupa entera: la celda solo pone un ancho
-    máximo, y un Dropdown suelto se achica a su contenido en lugar de llenarla."""
-    return ft.Row([control], col=col)
 
 
 class FormularioDerivacion:

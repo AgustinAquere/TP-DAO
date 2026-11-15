@@ -61,13 +61,15 @@ class ReportesVista(Vista):
                               on_click=self.seguro(lambda e: self._exportar(exportar_pdf))),
             ft.OutlinedButton("CSV", icon=ft.Icons.DOWNLOAD,
                               on_click=self.seguro(lambda e: self._exportar(exportar_csv))),
-        ], spacing=8)
+        ], spacing=8, tight=True)
         barra = ft.Container(
             ft.Column([
+                # Con wrap, lo que no entra pasa a la línea siguiente: en una sola fila, al achicar la ventana
+                # los botones quedaban fuera de la barra y no se veían.
                 ft.Row([
                     ft.Column([self.reporte, self.buscar], spacing=4, width=280, tight=True),
                     self.desde, self.hasta, self.agrupar, botones,
-                ], spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                ], spacing=12, run_spacing=10, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER),
                 self.atajos,
             ], spacing=10),
             padding=ft.Padding.symmetric(horizontal=14, vertical=12), border_radius=12,

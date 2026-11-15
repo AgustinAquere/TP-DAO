@@ -316,6 +316,12 @@ def fila(*controles: ft.Control, espacio: int = 12) -> ft.Row:
     return ft.Row(list(controles), spacing=espacio, vertical_alignment=ft.CrossAxisAlignment.START)
 
 
+def a_lo_ancho(control: ft.Control, col: dict) -> ft.Row:
+    """Celda de ResponsiveRow que el control (con expand=True) ocupa entera: la celda solo pone un ancho
+    máximo, y un Dropdown suelto se achica a su contenido en lugar de llenarla."""
+    return ft.Row([control], col=col)
+
+
 # --- Presentación de datos -----------------------------------------------------------------
 def chip(texto: str, color=None) -> ft.Container:
     color = color or COLORES_ESTADO.get(texto, ft.Colors.BLUE_GREY_600)

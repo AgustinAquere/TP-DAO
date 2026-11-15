@@ -4,10 +4,12 @@ from datetime import date, timedelta
 import flet as ft
 
 from app.dominio.enums import TipoItem
+from app.dominio.excepciones import ErrorNegocio
 from app.dominio.facturacion import ItemComprobante
-from app.presentacion.componentes import (Tabla, abrir_archivo, abrir_dialogo, boton_icono, campo, campo_fecha,
-                                          campo_numero, cargar_opciones, chip, encabezado, leer_decimal, leer_entero,
-                                          leer_fecha, leer_id, leer_texto, numero_editable, seccion, selector)
+from app.presentacion.componentes import (Tabla, a_lo_ancho, abrir_archivo, abrir_dialogo, boton_icono, campo,
+                                          campo_fecha, campo_numero, cargar_opciones, chip, encabezado, leer_decimal,
+                                          leer_entero, leer_fecha, leer_id, leer_texto, numero_editable, seccion,
+                                          selector)
 from app.presentacion.vistas.base_vista import Vista
 from app.reportes.exportador import exportar_comprobante_pdf
 from app.utils import fechas, formato
@@ -28,6 +30,15 @@ _COLORES_TIPO = {
     TipoItem.VACUNA: ft.Colors.ORANGE_800,
     TipoItem.INSUMO: ft.Colors.BLUE_GREY_600,
 }
+
+# Las atenciones pendientes van en un panel de ancho fijo: repartido en proporción con el comprobante, en
+# ventanas angostas quedaba tan finito que los nombres se escribían de a una letra por renglón.
+_ANCHO_PENDIENTES = 340
+_ANCHO_FECHA_PENDIENTE = 76
+_ANCHO_TIPO_PENDIENTE = 84
+# Con el panel del comprobante más angosto que esto, cada ítem ocupa dos renglones (tipo y descripción;
+# cantidad, precio e importe): en uno solo, el campo de la descripción quedaba aplastado.
+_ANCHO_ITEMS_EN_UN_RENGLON = 720
 
 
 def _tarjeta_contexto(etiqueta: str, valor: str, icono) -> ft.Container:
@@ -90,9 +101,9 @@ def _pista_comprobante() -> ft.Text:
 def _encabezado_pendientes() -> ft.Container:
     texto = lambda titulo: ft.Text(titulo, size=13, weight=ft.FontWeight.BOLD)
     return ft.Container(
-        ft.Row([ft.Container(texto("Fecha"), width=132),
+        ft.Row([ft.Container(texto("Fecha"), width=_ANCHO_FECHA_PENDIENTE),
                 ft.Container(texto("Paciente"), expand=True),
-                ft.Container(texto("Tipo"), width=96),
+                ft.Container(texto("Tipo"), width=_ANCHO_TIPO_PENDIENTE),
                 ft.Container(width=40)], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
         bgcolor=_FONDO_TABLA, border_radius=12, padding=ft.Padding.symmetric(horizontal=8, vertical=10))
 
@@ -101,6 +112,9 @@ class FacturacionVista(Vista):
     def construir(self) -> ft.Control:
         self._id_atencion: int | None = None
         self._items: list[ItemComprobante] = []
+        self._items_en_dos_renglones = False
+        self._importes: list[ft.Text] = []
+        self._lecturas_items: list = []
         self.lista_pendientes = ft.Column(spacing=0, expand=True, scroll=ft.ScrollMode.AUTO)
         self.vacio_pendientes = ft.Text("Todas las atenciones están facturadas.", italic=True,
                                         color=ft.Colors.ON_SURFACE_VARIANT, visible=False)
@@ -123,28 +137,37 @@ class FacturacionVista(Vista):
                                            horizontal_alignment=ft.CrossAxisAlignment.END, spacing=8)],
                                 alignment=ft.MainAxisAlignment.END))
         editor.content.horizontal_alignment = ft.CrossAxisAlignment.STRETCH
+        editor.on_size_change = self._al_cambiar_ancho_editor
+        editor.size_change_interval = 100
         pendientes = ft.Column([_encabezado_pendientes(), self.lista_pendientes, self.vacio_pendientes],
                                expand=True, spacing=0, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
-        emitir = ft.Row([ft.Container(pendientes, expand=4),
+        emitir = ft.Row([ft.Container(pendientes, width=_ANCHO_PENDIENTES),
                          ft.Container(ft.Column([editor], scroll=ft.ScrollMode.AUTO,
-                                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH), expand=7)],
+                                                horizontal_alignment=ft.CrossAxisAlignment.STRETCH), expand=True)],
                         vertical_alignment=ft.CrossAxisAlignment.START, expand=True, spacing=16)
 
+        # En una sola fila con anchos fijos, el buscador quedaba aplastado en ventanas angostas: los filtros
+        # se acomodan en dos filas hasta que la ventana es bien ancha (xxl), como en el historial de atenciones.
         recargar = self.seguro(lambda e: self._cargar_emitidos())
-        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), width=170, al_cambiar=recargar,
+        col_fecha = {"xs": 6, "md": 3, "xxl": 2}
+        self.desde = campo_fecha("Desde", date.today() - timedelta(days=30), col=col_fecha, al_cambiar=recargar,
                                  on_submit=recargar)
-        self.hasta = campo_fecha("Hasta", date.today(), width=170, al_cambiar=recargar, on_submit=recargar)
-        self.filtro_clinica = selector("Clínica", [], "", width=280, on_select=recargar)
+        self.hasta = campo_fecha("Hasta", date.today(), col=col_fecha, al_cambiar=recargar, on_submit=recargar)
+        self.filtro_clinica = selector("Clínica", [], "", expand=True, on_select=recargar)
         self.busqueda = campo("Número, mascota, responsable o DNI", expand=True, on_submit=recargar)
         self.emitidos = Tabla(["Número", "Emisión", "Cliente", "Mascota", "Clínica", "Tarifa", ("Subtotal", True),
                                ("Total", True)], acciones=self._acciones_emitido,
                               vacio="No hay comprobantes con esos filtros.")
-        emitidos = ft.Column([ft.Row([
-            self.desde, self.hasta, self.filtro_clinica, ft.Container(expand=True), self.busqueda,
+        buscador = ft.Row([
+            self.busqueda,
             ft.IconButton(ft.Icons.SEARCH, tooltip="Buscar", on_click=recargar),
             ft.IconButton(ft.Icons.FILTER_ALT_OFF, tooltip="Quitar filtros",
                           on_click=self.seguro(self._limpiar_filtros)),
-        ], vertical_alignment=ft.CrossAxisAlignment.CENTER), self.emitidos.control], expand=True, spacing=10)
+        ], spacing=4, vertical_alignment=ft.CrossAxisAlignment.CENTER, col={"xs": 12, "xxl": 5})
+        filtros = ft.ResponsiveRow([self.desde, self.hasta,
+                                    a_lo_ancho(self.filtro_clinica, {"xs": 12, "md": 6, "xxl": 3}), buscador],
+                                   spacing=12, run_spacing=12, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        emitidos = ft.Column([filtros, self.emitidos.control], expand=True, spacing=10)
         pestania = lambda control: ft.Container(control, padding=ft.Padding.only(top=12))
         self.pestanias = ft.Tabs(length=2, selected_index=0, expand=True,
                                  on_change=self.sincronizar_pestania("facturacion"), content=ft.Column([
@@ -172,15 +195,20 @@ class FacturacionVista(Vista):
         self.lista_pendientes.controls = [self._fila_pendiente(atencion) for atencion in atenciones]
 
     def _fila_pendiente(self, atencion: dict) -> ft.Container:
-        paciente = ft.Column([ft.Text(atencion["mascota"], size=13, weight=ft.FontWeight.W_600),
-                              ft.Text(atencion["responsable"], size=12, color=ft.Colors.ON_SURFACE_VARIANT)],
+        un_renglon = dict(max_lines=1, overflow=ft.TextOverflow.ELLIPSIS)
+        paciente = ft.Column([ft.Text(atencion["mascota"], size=13, weight=ft.FontWeight.W_600, **un_renglon),
+                              ft.Text(atencion["responsable"], size=12, color=ft.Colors.ON_SURFACE_VARIANT,
+                                      **un_renglon)],
                              spacing=0, tight=True)
+        momento = fechas.fecha_hora_desde_sql(atencion["fecha_hora"])
+        fecha = ft.Column([ft.Text(fechas.formatear_fecha(momento), size=12),
+                           ft.Text(momento.strftime("%H:%M"), size=12, color=ft.Colors.ON_SURFACE_VARIANT)],
+                          spacing=0, tight=True)
         fila = ft.Container(
             ft.Row([
-                ft.Container(ft.Text(fechas.formatear_fecha_hora(fechas.fecha_hora_desde_sql(atencion["fecha_hora"])),
-                                     size=12), width=132),
+                ft.Container(fecha, width=_ANCHO_FECHA_PENDIENTE),
                 ft.Container(paciente, expand=True),
-                ft.Container(chip(atencion["tipo"]), width=96),
+                ft.Container(chip(atencion["tipo"]), width=_ANCHO_TIPO_PENDIENTE),
                 boton_icono(ft.Icons.RECEIPT, "Preparar comprobante",
                             self.seguro(lambda e, id_atencion=atencion["id_atencion"]: self._seleccionar(id_atencion))),
             ], spacing=6, vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -216,31 +244,64 @@ class FacturacionVista(Vista):
         self._mostrar_items()
 
     def _mostrar_items(self) -> None:
-        def al_cambiar(item: ItemComprobante, descripcion, cantidad, precio):
-            def actualizar(e):
+        def leer_campos(item: ItemComprobante, descripcion, cantidad, precio):
+            def leer():
                 item.descripcion = leer_texto(descripcion) or ""
                 item.cantidad = leer_entero(cantidad, True)
                 item.precio_unitario = leer_decimal(precio, True)
-                self._recalcular()
-            return self.seguro(actualizar)
+            return leer
 
         def quitar(item: ItemComprobante):
             return self.seguro(lambda e: (self._items.remove(item), self._mostrar_items(), self.page.update()))
 
-        filas = []
+        filas, self._importes, self._lecturas_items = [], [], []
+        dos_renglones = self._items_en_dos_renglones
         for item in self._items:
             descripcion = campo("Descripción", item.descripcion, expand=True)
             cantidad = campo_numero("Cant.", item.cantidad, width=80)
-            precio = campo("Precio unitario", numero_editable(item.precio_unitario), width=130,
-                           keyboard_type=ft.KeyboardType.NUMBER)
+            # En dos renglones el precio comparte el suyo solo con la cantidad y el importe: ocupa lo que sobra.
+            ancho_precio = {"expand": True} if dos_renglones else {"width": 130}
+            precio = campo("Precio unitario", numero_editable(item.precio_unitario),
+                           keyboard_type=ft.KeyboardType.NUMBER, **ancho_precio)
+            leer = leer_campos(item, descripcion, cantidad, precio)
+            actualizar = self.seguro(lambda e, leer=leer: (leer(), self._recalcular()))
             for control in (descripcion, cantidad, precio):
-                control.on_blur = control.on_submit = al_cambiar(item, descripcion, cantidad, precio)
-            filas.append(ft.Row([ft.Container(chip(*ETIQUETAS_ITEM[item.tipo]), width=110),
-                                 descripcion, cantidad, precio,
-                                 ft.Text(formato.moneda(item.importe()), width=110, text_align=ft.TextAlign.RIGHT),
-                                 ft.IconButton(ft.Icons.CLOSE, tooltip="Quitar ítem", on_click=quitar(item))]))
+                control.on_blur = control.on_submit = actualizar
+            tipo = ft.Container(chip(*ETIQUETAS_ITEM[item.tipo]), width=110)
+            importe = ft.Text(formato.moneda(item.importe()), width=110, text_align=ft.TextAlign.RIGHT)
+            boton_quitar = ft.IconButton(ft.Icons.CLOSE, tooltip="Quitar ítem", on_click=quitar(item))
+            if dos_renglones:
+                centrado = ft.CrossAxisAlignment.CENTER
+                filas.append(ft.Container(
+                    ft.Column([ft.Row([tipo, descripcion, boton_quitar], vertical_alignment=centrado),
+                               ft.Row([cantidad, precio, importe], vertical_alignment=centrado)], spacing=8),
+                    padding=ft.Padding.only(bottom=8),
+                    border=ft.Border.only(bottom=ft.BorderSide(1, ft.Colors.with_opacity(0.35,
+                                                                                         ft.Colors.OUTLINE_VARIANT)))))
+            else:
+                filas.append(ft.Row([tipo, descripcion, cantidad, precio, importe, boton_quitar]))
+            self._importes.append(importe)
+            self._lecturas_items.append(leer)
         self.lista_items.controls = filas or [ft.Text("El comprobante no tiene ítems.", italic=True)]
         self._recalcular()
+
+    def _al_cambiar_ancho_editor(self, e: ft.LayoutSizeChangeEvent) -> None:
+        """Acomoda los ítems en uno o dos renglones según el ancho que le deja la ventana al comprobante."""
+        dos_renglones = e.width < _ANCHO_ITEMS_EN_UN_RENGLON
+        if dos_renglones == self._items_en_dos_renglones:
+            return
+        self._items_en_dos_renglones = dos_renglones
+        if self._items:
+            self.seguro(self._reacomodar_items)(e)
+
+    def _reacomodar_items(self, e=None) -> None:
+        # Los campos se vuelven a crear: antes se guarda lo tipeado que todavía no se confirmó (sin perder el foco).
+        for leer in self._lecturas_items:
+            try:
+                leer()
+            except ErrorNegocio:
+                pass  # un valor a medio escribir: el ítem conserva el anterior
+        self._mostrar_items()
 
     def _recalcular(self) -> None:
         if self._id_atencion is None:
@@ -249,9 +310,8 @@ class FacturacionVista(Vista):
         self.totales.controls = [_linea_total("Subtotal", comprobante.subtotal()),
                                  _linea_total("Recargo / Descuento", comprobante.ajuste()),
                                  _linea_total("TOTAL", comprobante.total(), True)]
-        for fila, item in zip(self.lista_items.controls, self._items):
-            if isinstance(fila, ft.Row):
-                fila.controls[4].value = formato.moneda(item.importe())
+        for importe, item in zip(self._importes, self._items):
+            importe.value = formato.moneda(item.importe())
         self.boton_emitir.disabled = not self._items
 
     def _agregar_servicio(self, e) -> None:
