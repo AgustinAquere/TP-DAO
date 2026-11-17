@@ -4,8 +4,8 @@ import flet as ft
 from app.dominio.laboratorio import DetalleResultado
 from app.dominio.remito import EN_LABORATORIO, EN_POSTA
 from app.presentacion.componentes import (Tabla, abrir_dialogo, boton_cancelar, boton_icono, campo, campo_fecha_hora,
-                                          campo_numero, cargar_opciones, chip, encabezado, fila, leer_decimal,
-                                          leer_fecha_hora, leer_id, leer_texto, numero_editable, selector)
+                                          campo_numero, cargar_opciones, chip, confirmar, encabezado, fila,
+                                          leer_decimal, leer_fecha_hora, leer_id, leer_texto, numero_editable, selector)
 from app.presentacion.vistas.base_vista import Vista
 from app.utils import fechas, formato
 
@@ -108,11 +108,19 @@ class LaboratorioVista(Vista):
         momento = campo_fecha_hora("Fecha y hora de recepción *", llegada or fechas.ahora(), disabled=bloqueado)
         if bloqueado:
             momento.suffix = None
-        precinto = ft.RadioGroup(value="INTACTO", content=ft.Row([
+        precinto = ft.RadioGroup(content=ft.Row([
             ft.Radio(value="INTACTO", label="Intacto"), ft.Radio(value="ROTO", label="Roto / violentado")]))
         temp_registrada = remito.get("ultima_temperatura") if bloqueado else None
-        temperatura = campo_numero("Temperatura de arribo (°C)", temp_registrada, disabled=temp_registrada is not None)
-        observacion = campo("Motivo / observación (obligatorio si el precinto está roto)")
+        temperatura = campo_numero("Temperatura de arribo (°C) *", temp_registrada, disabled=temp_registrada is not None)
+        observacion = campo("Motivo / observación")
+
+        def actualizar_precinto(e=None) -> None:
+            intacto = precinto.value == "INTACTO"
+            temperatura.label = "Temperatura de arribo (°C) *" if intacto else "Temperatura de arribo (°C)"
+            observacion.label = "Motivo / observación" if intacto else "Observación (opcional)"
+
+        precinto.on_change = self.seguro(actualizar_precinto)
+        precinto.value = "INTACTO"
         avisos = [ft.Text(f"Precinto colocado en origen: {remito['precinto']}. Verifique su estado antes de abrir la "
                           "conservadora: si está roto, ninguna muestra podrá procesarse.")]
         if bloqueado:
@@ -123,9 +131,23 @@ class LaboratorioVista(Vista):
                                   color=ft.Colors.ON_SURFACE_VARIANT))
 
         def registrar(e):
+            if precinto.value != "INTACTO":
+                datos = _datos_recepcion(False)
+                confirmar(self.page, "Precinto roto",
+                          f"El remito {remito['numero']} y todas sus muestras quedarán rechazados. "
+                          "Esta acción no se puede deshacer.\n\n¿Registrar la recepción de todos modos?",
+                          self.seguro(lambda: registrar_recepcion(datos)), "Rechazar remito", peligroso=True)
+                return
+            registrar_recepcion(_datos_recepcion(True))
+
+        def _datos_recepcion(intacto: bool) -> tuple:
+            return (leer_id(bioquimico, True), intacto, leer_decimal(temperatura, requerido=intacto),
+                    leer_texto(observacion), leer_fecha_hora(momento, True))
+
+        def registrar_recepcion(datos: tuple) -> None:
+            id_bioquimico, intacto, temperatura_arribo, observacion_texto, fecha_hora = datos
             recibido = self.servicios.laboratorio.registrar_recepcion(
-                remito["id_remito"], leer_id(bioquimico, True), precinto.value == "INTACTO",
-                leer_decimal(temperatura), leer_texto(observacion), leer_fecha_hora(momento, True))
+                remito["id_remito"], id_bioquimico, intacto, temperatura_arribo, observacion_texto, fecha_hora)
             self.page.pop_dialog()
             aceptadas = [m for m in recibido.muestras if m.nombre_estado() == "RECIBIDA"]
             rechazadas = [m for m in recibido.muestras if m.nombre_estado() == "RECHAZADA"]

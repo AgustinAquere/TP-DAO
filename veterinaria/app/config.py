@@ -1,5 +1,5 @@
 """Configuración general de la aplicación (rutas, parámetros de negocio y plantillas)."""
-from datetime import time
+from datetime import date, time
 from pathlib import Path
 
 # --- Rutas -------------------------------------------------------------------
@@ -18,6 +18,47 @@ JORNADA_INICIO = time(8, 0)
 JORNADA_FIN = time(20, 0)
 INTERVALO_TURNOS_MIN = 30
 DURACIONES_TURNO_MIN = (15, 30, 45, 60)
+
+# --- Atención clínica y vacunación -------------------------------------------
+# Peso máximo admisible en animales domésticos / pequeños animales (kg)
+PESO_MAXIMO_KG = 150.0
+
+# Lotes de vacunas con su fecha de vencimiento (código, vencimiento), sin manejo de stock
+# para conservar el alcance del DER. Se ordenan/filtran por vigencia a la fecha de atención.
+LOTES_VACUNA: dict[str, list[tuple[str, date]]] = {
+    "Séxtuple canina": [
+        ("L09412", date(2026, 3, 31)),
+        ("L24810", date(2027, 6, 30)),
+        ("L25340", date(2028, 2, 29)),
+        ("L25915", date(2028, 9, 30)),
+    ],
+    "Antirrábica": [
+        ("L09380", date(2026, 4, 30)),
+        ("L24605", date(2027, 5, 31)),
+        ("L25190", date(2028, 1, 31)),
+        ("L25820", date(2028, 8, 31)),
+    ],
+    "Triple felina": [
+        ("L24722", date(2027, 7, 31)),
+        ("L25410", date(2028, 3, 31)),
+    ],
+    "Leucemia felina": [
+        ("L24930", date(2027, 8, 31)),
+        ("L25508", date(2028, 4, 30)),
+    ],
+    "Tos de las perreras": [
+        ("L24885", date(2027, 7, 31)),
+        ("L25612", date(2028, 5, 31)),
+    ],
+    "Mixomatosis": [
+        ("L24590", date(2027, 4, 30)),
+        ("L25275", date(2028, 2, 29)),
+    ],
+}
+LOTES_VACUNA_GENERICOS: list[tuple[str, date]] = [
+    ("L25100", date(2027, 12, 31)),
+    ("L25750", date(2028, 6, 30)),
+]
 
 # --- Facturación (patrón Strategy) -------------------------------------------
 # Servicio clínico que se factura según el tipo de atención (códigos de servicio_clinico)

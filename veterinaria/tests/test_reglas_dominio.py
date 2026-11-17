@@ -2,8 +2,9 @@
 import unittest
 from datetime import date, datetime
 
-from app.dominio.enums import TipoItem
-from app.dominio.enums import EstadoTurno
+from app import config
+from app.dominio.atencion import Atencion
+from app.dominio.enums import EstadoTurno, TipoAtencion, TipoItem
 from app.dominio.excepciones import TransicionInvalidaError, TurnoSuperpuestoError, ValidacionError
 from app.dominio.facturacion import ComprobanteAtencion, ItemComprobante
 from app.dominio.mascota import Especie, Mascota
@@ -123,6 +124,17 @@ class TestEsquemaDeVacunas(unittest.TestCase):
     def test_mascota_sin_responsable(self):
         with self.assertRaises(ValidacionError):
             Mascota(id_cliente=None, id_especie=1, nombre="Sin dueño", fecha_nacimiento=date(2025, 1, 1)).validar()
+
+    def test_peso_maximo_en_atencion_y_mascota(self):
+        ahora = datetime.now()
+        Atencion(id_historia=1, id_veterinario=1, id_clinica=1, fecha_hora=ahora, tipo=TipoAtencion.CONSULTA,
+                 motivo="Control", peso_registrado_kg=config.PESO_MAXIMO_KG).validar()
+        with self.assertRaises(ValidacionError):
+            Atencion(id_historia=1, id_veterinario=1, id_clinica=1, fecha_hora=ahora, tipo=TipoAtencion.CONSULTA,
+                     motivo="Control", peso_registrado_kg=config.PESO_MAXIMO_KG + 0.1).validar()
+        with self.assertRaises(ValidacionError):
+            Mascota(id_cliente=1, id_especie=1, nombre="Gigante", fecha_nacimiento=date(2025, 1, 1),
+                    peso_kg=config.PESO_MAXIMO_KG + 1).validar()
 
 
 if __name__ == "__main__":

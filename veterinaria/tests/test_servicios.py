@@ -2,6 +2,7 @@
 import unittest
 from datetime import date, datetime, timedelta
 
+from app import config
 from app.dominio.enums import EstadoTurno, TipoAtencion
 from app.dominio.excepciones import (ErrorPersistencia, EsquemaVacunasIncompletoError, TransicionInvalidaError,
                                      TurnoSuperpuestoError, ValidacionError)
@@ -119,6 +120,23 @@ class TestValidacionesDeNegocio(BaseDeDatosDePrueba):
         atencion = self.s.atenciones.registrar(**datos, vacunas=vacunas)  # aplicándolas, el esquema queda al día
         self.assertEqual(atencion.vacunas_pendientes, [])
         self.assertEqual(self.s.atenciones.vacunas_pendientes(cachorro.id), [])
+
+    def test_peso_maximo_y_lotes_vigentes_en_atencion(self):
+        id_mascota = self.id_de("SELECT MIN(id_mascota) FROM mascota")
+        veterinario = self.s.catalogos.listar("veterinario")[0]
+        base = dict(id_mascota=id_mascota, id_veterinario=veterinario.id, id_clinica=veterinario.ids_clinicas[0],
+                    tipo=TipoAtencion.CONSULTA, motivo="Chequeo", confirmar_esquema_incompleto=True)
+        with self.assertRaises(ValidacionError):
+            self.s.atenciones.registrar(**base, peso_registrado_kg=config.PESO_MAXIMO_KG + 5)
+
+        id_sextuple = self.id_de("SELECT id_vacuna FROM vacuna WHERE nombre = 'Séxtuple canina'")
+        vigentes = self.s.atenciones.lotes_disponibles(id_sextuple, date(2026, 11, 16))
+        self.assertTrue(vigentes)
+        self.assertNotIn("L09412", [codigo for codigo, _ in vigentes])  # vencido el 31/03/2026
+        self.assertEqual(vigentes, sorted(vigentes, key=lambda par: par[1]))
+        with self.assertRaises(ValidacionError):
+            self.s.atenciones.registrar(**base, fecha_hora=datetime(2026, 11, 16, 10, 0),
+                                        vacunas=[(id_sextuple, "L09412")])
 
 
 class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
@@ -254,6 +272,8 @@ class TestCircuitoDeMuestras(BaseDeDatosDePrueba):
         _, orden, id_clinica, veterinario = self._atencion_con_orden(["BIOQ", "T4"])
         remito = self._enviar(orden, id_clinica, veterinario)
         bioquimico = self.s.catalogos.listar("bioquimico")[0]
+        with self.assertRaises(ValidacionError):
+            self.s.laboratorio.registrar_recepcion(remito.id, bioquimico.id, precinto_intacto=True)
         self.s.laboratorio.registrar_recepcion(remito.id, bioquimico.id, precinto_intacto=True, temperatura_arribo=5)
         for fila in self.bd.consultar("SELECT an.id_analisis_solicitado, ta.codigo FROM analisis_solicitado an "
                                       "JOIN tipo_analisis ta USING (id_tipo_analisis) WHERE id_orden = ?", (orden.id,)):

@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime
 
+from app import config
 from app.dominio.atencion import Atencion, Tratamiento
 from app.dominio.derivacion import OrdenDerivacion
 from app.dominio.enums import EstadoTurno, Prioridad, TipoAtencion, TipoMuestra
@@ -54,6 +55,16 @@ class AtencionService:
     def esquema_de(self, mascota: Mascota) -> list[VacunaObligatoria]:
         return mascota.especie.esquema if mascota.especie else []
 
+    def lotes_disponibles(self, id_vacuna: int, fecha: date | None = None) -> list[tuple[str, date]]:
+        """Lotes vigentes (no vencidos a `fecha`) para la vacuna indicada, ordenados por próximo vencimiento."""
+        vacuna = self._vacunas.obtener_por_id(id_vacuna)
+        if vacuna is None:
+            raise EntidadNoEncontradaError("la vacuna", id_vacuna)
+        referencia = fecha or date.today()
+        lotes = config.LOTES_VACUNA.get(vacuna.nombre, config.LOTES_VACUNA_GENERICOS)
+        vigentes = [(codigo, vto) for codigo, vto in lotes if vto >= referencia]
+        return sorted(vigentes, key=lambda par: par[1])
+
     # --- Registro de la atención ---------------------------------------------------------
     def registrar(self, *, id_mascota: int, id_veterinario: int, id_clinica: int, tipo: TipoAtencion, motivo: str,
                   fecha_hora: datetime | None = None, id_turno: int | None = None, anamnesis: str | None = None,
@@ -86,6 +97,10 @@ class AtencionService:
             vacuna = self._vacunas.obtener_por_id(id_vacuna)
             if vacuna is None:
                 raise EntidadNoEncontradaError("la vacuna", id_vacuna)
+            vencimiento = dict(config.LOTES_VACUNA.get(vacuna.nombre, ())).get((lote or "").strip())
+            if vencimiento is not None and vencimiento < atencion.fecha_hora.date():
+                raise ValidacionError(
+                    f"El lote {lote.strip()} de {vacuna.nombre} está vencido ({fechas.formatear_fecha(vencimiento)}).")
             atencion.aplicar_vacuna(vacuna, lote, self._esquemas.obtener(mascota.id_especie, id_vacuna))
 
         atencion.vacunas_pendientes = atencion.validar_esquema_vacunas(mascota)

@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import date
 
+from app import config
 from app.dominio.enums import Sexo
 from app.dominio.vacunas import AplicacionVacuna, VacunaObligatoria
 from app.utils import fechas
@@ -47,6 +48,8 @@ class Mascota:
             (lambda m: m.fecha_nacimiento is None or m.fecha_nacimiento <= date.today(),
              "La fecha de nacimiento no puede ser futura."),
             (lambda m: v.positivo_u_omitido(m.peso_kg), "El peso debe ser mayor a cero."),
+            (lambda m: m.peso_kg is None or m.peso_kg <= config.PESO_MAXIMO_KG,
+             f"El peso no puede superar los {config.PESO_MAXIMO_KG:g} kg."),
         ])
 
     def edad_en_semanas(self, fecha: date | None = None) -> int | None:

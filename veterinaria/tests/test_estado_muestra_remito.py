@@ -98,6 +98,11 @@ class TestCicloDeVidaRemito(unittest.TestCase):
         self.assertTrue(all(m.nombre_estado() == "RECHAZADA" for m in o.muestras))
         self.assertFalse(r.recepcion.aceptada)
 
+    def test_precinto_intacto_exige_temperatura_de_arribo(self):
+        _, r = f.remito_en_transito()
+        with self.assertRaises(ValidacionError):
+            r.recibir(recepcion(temperatura=None), responsable="Bioq")
+
     def test_precinto_intacto_evalua_temperatura_y_viabilidad(self):
         o, r = f.remito_en_transito()
         r.recibir(recepcion(horas=30), responsable="Bioq")   # 30 h: vence el hemograma (24 h), no la bioquímica (48 h)
