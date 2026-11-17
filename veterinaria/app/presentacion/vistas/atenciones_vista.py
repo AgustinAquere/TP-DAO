@@ -16,6 +16,7 @@ from app.utils import fechas, formato
 
 TIPOS_ATENCION = [(t.value, formato.etiqueta(t)) for t in TipoAtencion]
 PRIORIDADES = [(p.value, formato.etiqueta(p)) for p in Prioridad]
+_ANCHO_LOTE = 260
 
 
 class FormularioDerivacion:
@@ -142,17 +143,20 @@ class AtencionesVista(Vista):
         self.veterinario = selector("Veterinario *", [], on_select=self.seguro(self._cambio_veterinario))
         self.clinica = selector("Clínica *", [])
         self.tipo = selector("Tipo de atención *", TIPOS_ATENCION, TipoAtencion.CONSULTA.value)
-        self.fecha_hora = campo_fecha_hora("Fecha y hora *", fechas.ahora())
+        self.fecha_hora = campo_fecha_hora("Fecha y hora *", fechas.ahora(),
+                                           al_cambiar=self.seguro(self._cambio_fecha_hora),
+                                           on_submit=self.seguro(self._cambio_fecha_hora))
         self.motivo = campo("Motivo de consulta *")
         self.anamnesis = campo("Anamnesis", multiline=True, min_lines=2, max_lines=4)
         self.diagnostico = campo("Diagnóstico")
         self.peso = campo_numero("Peso registrado (kg)")
         self.panel_vacunas = ft.Column(spacing=6)
-        self.otra_vacuna = selector("Otra vacuna (no obligatoria)", [], width=320)
-        self._vacunas_pendientes: list[tuple[ft.Checkbox, ft.TextField]] = []
+        self.otra_vacuna = selector("Otra vacuna (no obligatoria)", [], width=320,
+                                    on_select=self.seguro(self._cambio_otra_vacuna))
+        self._vacunas_pendientes: list[tuple[ft.Checkbox, ft.Dropdown]] = []
         self._vacunas_extra: list[tuple[int, str, str]] = []
         self.lista_extra = ft.Row(wrap=True)
-        self.lote_extra = campo("Lote", width=140)
+        self.lote_extra = selector("Lote", [], width=_ANCHO_LOTE, disabled=True)
         self._tratamientos: list[Tratamiento] = []
         self.lista_tratamientos = ft.Column(spacing=4)
         self.derivacion = FormularioDerivacion(self)
@@ -167,7 +171,8 @@ class AtencionesVista(Vista):
             seccion("Control del esquema de vacunas obligatorias", ft.Icons.VACCINES, self.panel_vacunas,
                     ft.Row([self.otra_vacuna, self.lote_extra,
                             ft.OutlinedButton("Agregar vacuna", icon=ft.Icons.ADD,
-                                              on_click=self.seguro(self._agregar_vacuna_extra))]), self.lista_extra),
+                                              on_click=self.seguro(self._agregar_vacuna_extra))],
+                           wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER), self.lista_extra),
             seccion("Tratamientos indicados", ft.Icons.MEDICATION, self.lista_tratamientos,
                     ft.OutlinedButton("Agregar tratamiento", icon=ft.Icons.ADD,
                                       on_click=self.seguro(lambda e: self._dialogo_tratamiento()))),
@@ -184,6 +189,7 @@ class AtencionesVista(Vista):
         cargar_opciones(self.mascota, self.opciones_mascotas())
         cargar_opciones(self.veterinario, self.opciones_veterinarios())
         cargar_opciones(self.otra_vacuna, [(v.id, v.nombre) for v in self.servicios.catalogos.listar("vacuna")])
+        self._cambio_otra_vacuna(None)
         self._turnos = {str(t["id_turno"]): t for t in self.servicios.turnos.pendientes_de_atencion()}
         if id_turno and str(id_turno) not in self._turnos:  # turno de otro día abierto desde la agenda
             self._turnos |= {str(t["id_turno"]): t for t in self.servicios.turnos.listar(estado=EstadoTurno.RESERVADO)
@@ -217,17 +223,39 @@ class AtencionesVista(Vista):
         if self.clinica.value is None and self.clinica.options:
             self.clinica.value = self.clinica.options[0].key
 
+    def _dia_atencion(self) -> date:
+        try:
+            return (leer_fecha_hora(self.fecha_hora) or fechas.ahora()).date()
+        except ValidacionError:
+            return fechas.ahora().date()
+
+    def _opciones_lote(self, id_vacuna: int, dia: date | None = None) -> list[tuple[str, str]]:
+        lotes = self.servicios.atenciones.lotes_disponibles(id_vacuna, dia or self._dia_atencion())
+        return [(codigo, f"{codigo} · Vto. {vto:%m/%Y}") for codigo, vto in lotes]
+
+    def _cambio_fecha_hora(self, e) -> None:
+        if leer_id(self.mascota) is not None:
+            self._actualizar_esquema_vacunas()
+        self._cambio_otra_vacuna(None)
+
     def _cambio_mascota(self, e) -> None:
+        """Precarga el último peso de la mascota y controla su esquema obligatorio de vacunación."""
+        id_mascota = leer_id(self.mascota)
+        if id_mascota is not None:
+            mascota = self.servicios.mascotas.obtener(id_mascota)
+            self.peso.value = numero_editable(mascota.peso_kg)  # último peso registrado, para actualizarlo si cambió
+        self._actualizar_esquema_vacunas()
+
+    def _actualizar_esquema_vacunas(self) -> None:
         """Muestra las vacunas obligatorias pendientes de la mascota para aplicarlas en esta atención."""
         self._vacunas_pendientes = []
         id_mascota = leer_id(self.mascota)
         if id_mascota is None:
             self.panel_vacunas.controls = [ft.Text("Seleccione una mascota.", italic=True)]
             return
-        dia = (leer_fecha_hora(self.fecha_hora) or fechas.ahora()).date()
+        dia = self._dia_atencion()
         pendientes = self.servicios.atenciones.vacunas_pendientes(id_mascota, dia)
         mascota = self.servicios.mascotas.obtener(id_mascota)
-        self.peso.value = numero_editable(mascota.peso_kg)  # último peso registrado, para actualizarlo si cambió
         if not pendientes:
             self.panel_vacunas.controls = [chip("Esquema obligatorio al día", ft.Colors.GREEN_700)]
             return
@@ -235,19 +263,47 @@ class AtencionesVista(Vista):
                              "Marque las que se aplican en esta atención:", color=ft.Colors.ORANGE_800)]
         for vo in pendientes:
             exigible = vo.fecha_vencimiento(mascota)
-            check = ft.Checkbox(label=f"{vo.nombre_vacuna} (exigible desde {fechas.formatear_fecha(exigible)})",
-                                value=True, data=vo.id_vacuna, expand=True)
-            lote = campo("Lote *", width=160)
+            opciones = self._opciones_lote(vo.id_vacuna, dia)
+            lote = selector("Lote *", opciones, opciones[0][0] if opciones else None, width=_ANCHO_LOTE)
+            check = ft.Checkbox(
+                value=True, data=vo.id_vacuna,
+                on_change=self.seguro(lambda e, c_lote=lote: self._alternar_vacuna_pendiente(e.control, c_lote)))
+            etiqueta = ft.GestureDetector(
+                ft.Text(f"{vo.nombre_vacuna} (exigible desde {fechas.formatear_fecha(exigible)})"),
+                mouse_cursor=ft.MouseCursor.CLICK, expand=True,
+                on_tap=self.seguro(lambda e, c=check, c_lote=lote: self._click_etiqueta_vacuna(c, c_lote)))
             self._vacunas_pendientes.append((check, lote))
-            controles.append(ft.Row([check, lote]))
+            controles.append(ft.Row([check, etiqueta, lote], spacing=8,
+                                    vertical_alignment=ft.CrossAxisAlignment.CENTER))
         self.panel_vacunas.controls = controles
+
+    @staticmethod
+    def _alternar_vacuna_pendiente(check: ft.Checkbox, lote: ft.Dropdown) -> None:
+        lote.disabled = not check.value
+
+    @staticmethod
+    def _click_etiqueta_vacuna(check: ft.Checkbox, lote: ft.Dropdown) -> None:
+        check.value = not check.value
+        lote.disabled = not check.value
+
+    def _cambio_otra_vacuna(self, e) -> None:
+        id_vacuna = leer_id(self.otra_vacuna)
+        opciones = self._opciones_lote(id_vacuna) if id_vacuna is not None else []
+        cargar_opciones(self.lote_extra, opciones, conservar=True)
+        if not self.lote_extra.value and opciones:
+            self.lote_extra.value = opciones[0][0]
+        self.lote_extra.disabled = not opciones
 
     def _agregar_vacuna_extra(self, e) -> None:
         id_vacuna = leer_id(self.otra_vacuna, requerido=True)
-        lote = leer_texto(self.lote_extra, requerido=True)
+        lote = leer_texto(self.lote_extra)
+        if not lote:
+            raise ValidacionError("Seleccione el lote de la vacuna.")
         nombre = next(o.text for o in self.otra_vacuna.options if o.key == str(id_vacuna))
         self._vacunas_extra.append((id_vacuna, nombre, lote))
-        self.otra_vacuna.value, self.lote_extra.value = None, ""
+        self.otra_vacuna.value = None
+        cargar_opciones(self.lote_extra, [], conservar=False)
+        self.lote_extra.disabled = True
         self._mostrar_vacunas_extra()
 
     def _mostrar_vacunas_extra(self) -> None:
@@ -326,10 +382,12 @@ class AtencionesVista(Vista):
         self.page.update()
 
     def _limpiar(self) -> None:
-        for control in (self.turno, self.mascota):
+        for control in (self.turno, self.mascota, self.otra_vacuna):
             control.value = None
         for control in (self.motivo, self.anamnesis, self.diagnostico, self.peso):
             control.value = ""
+        cargar_opciones(self.lote_extra, [], conservar=False)
+        self.lote_extra.disabled = True
         self.fecha_hora.value = fechas.formatear_fecha_hora(fechas.ahora())
         self.tipo.value = TipoAtencion.CONSULTA.value
         self._tratamientos, self._vacunas_extra, self._vacunas_pendientes = [], [], []

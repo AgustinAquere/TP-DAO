@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
+from app import config
 from app.dominio.derivacion import OrdenDerivacion, TipoAnalisis
 from app.dominio.enums import Prioridad, TipoAtencion, TipoMuestra
 from app.dominio.mascota import Mascota
@@ -55,6 +56,8 @@ class Atencion:
         v.validar(self, [
             (lambda a: v.texto_requerido(a.motivo), "El motivo de la atención es obligatorio."),
             (lambda a: v.positivo_u_omitido(a.peso_registrado_kg), "El peso registrado debe ser mayor a cero."),
+            (lambda a: a.peso_registrado_kg is None or a.peso_registrado_kg <= config.PESO_MAXIMO_KG,
+             f"El peso registrado no puede superar los {config.PESO_MAXIMO_KG:g} kg."),
             (lambda a: a.fecha_hora <= datetime.now() + timedelta(minutes=5),
              "La atención no puede registrarse con fecha futura."),
         ])

@@ -28,6 +28,8 @@ class RecepcionLaboratorio:
         if remito.precinto is not None and remito.precinto.fecha_hora_colocacion > self.fecha_hora:
             raise ValidacionError("La recepción no puede ser anterior a la colocación del precinto.")
         self.aceptada = self.precinto_intacto()
+        if self.aceptada and self.temperatura_arribo_c is None:
+            raise ValidacionError("Debe registrar la temperatura de arribo cuando el precinto está intacto.")
         if not self.aceptada:
             self.motivo_rechazo = self.motivo_rechazo or MOTIVO_PRECINTO_ROTO
         return self.aceptada
